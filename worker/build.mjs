@@ -7,6 +7,8 @@ export default {async fetch(request, env){
   const path=new URL(request.url).pathname;
   if(path==='/api/boletines')return bulletins(request);
   if(path==='/api/situation')return state(request,env.DB);
+  if(path==='/api/routes')return routeReports(request,env.DB);
+  if(path.startsWith('/api/routes/photo/'))return routePhoto(request,env.DB,path.split('/').pop());
   const key=path==='/'?'/index.html':path;
   if(!Object.hasOwn(assets,key))return new Response(null,{status:404});
   const type={js:'text/javascript',css:'text/css',html:'text/html',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg'}[key.split('.').pop()];

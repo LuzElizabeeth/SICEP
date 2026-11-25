@@ -12,3 +12,32 @@ async function state(request, db) {
   } else if(request.method !== 'GET') return new Response(null,{status:405});
   return Response.json(await db.prepare("SELECT stage,count,updated,assigned,received FROM exercise WHERE id=1").first(),{headers:{'Cache-Control':'no-store'}});
 }
+
+async function routeReports(request,db){
+  await db.prepare("CREATE TABLE IF NOT EXISTS route_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, town INTEGER NOT NULL, street TEXT NOT NULL, hazard TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', photo TEXT, created TEXT NOT NULL)").run();
+  if(request.method==='POST'){
+    if(request.headers.get('Origin')!==new URL(request.url).origin)return new Response(null,{status:403});
+    let body;try{body=await request.json()}catch{return Response.json({error:'JSON inválido'},{status:400})}
+    const roads={
+      0:['cholula-14','cholula-morelos','cholula-recta','cholula-forjadores','cholula-periferico'],
+      1:['atempan-129','atempan-tacopan','atempan-tlatlau','atempan-centro','atempan-benito']
+    };
+    const hazards=['derrumbe','socavon','inundacion','obstruccion','otro'];
+    const {town,street,hazard,note='',photo=null}=body||{};
+    if(!Number.isInteger(town)||!roads[town]?.includes(street)||!hazards.includes(hazard)||typeof note!=='string'||note.length>350)return Response.json({error:'Reporte inválido'},{status:400});
+    if(photo!==null&&(typeof photo!=='string'||photo.length>210000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(photo)))return Response.json({error:'Foto inválida o demasiado grande'},{status:413});
+    const created=new Date().toISOString();
+    await db.prepare("INSERT INTO route_reports (town,street,hazard,note,photo,created) VALUES (?,?,?,?,?,?)").bind(town,street,hazard,note.trim(),photo,created).run();
+  }else if(request.method!=='GET')return new Response(null,{status:405});
+  const reports=await db.prepare("SELECT id,town,street,hazard,note,created,CASE WHEN photo IS NULL THEN 0 ELSE 1 END AS hasPhoto FROM route_reports ORDER BY id DESC LIMIT 50").all();
+  const blocked=await db.prepare("SELECT DISTINCT CAST(town AS TEXT)||':'||street AS key FROM route_reports").all();
+  return Response.json({reports:reports.results||[],blocked:(blocked.results||[]).map(r=>r.key)},{headers:{'Cache-Control':'no-store'}});
+}
+async function routePhoto(request,db,id){
+  if(request.method!=='GET'||!/^[0-9]+$/.test(id))return new Response(null,{status:404});
+  const row=await db.prepare("SELECT photo FROM route_reports WHERE id=?").bind(Number(id)).first();
+  if(!row?.photo)return new Response(null,{status:404});
+  const encoded=row.photo.slice('data:image/jpeg;base64,'.length);
+  const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));
+  return new Response(bytes,{headers:{'Content-Type':'image/jpeg','Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'}});
+}

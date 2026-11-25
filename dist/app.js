@@ -1,7 +1,7 @@
-const paths={inicio:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',avisos:'M5 17h14l-2-4V9a5 5 0 0 0-10 0v4z M10 20h4',refugios:'M12 22s8-9 8-14a8 8 0 1 0-16 0c0 5 8 14 8 14z M15 9a3 3 0 1 1-6 0 3 3 0 0 1 6 0',contactos:'M5 3h4l2 5-3 2q2 5 6 6l2-3 5 2v4q0 3-4 2Q4 18 3 6z',guia:'M3 5q5-2 9 1 4-3 9-1v14q-5-2-9 1-4-3-9-1z M12 6v14',coord:'M4 5h16v16H4z M8 9h8 M8 13h8 M8 17h5'};
+const paths={inicio:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',avisos:'M5 17h14l-2-4V9a5 5 0 0 0-10 0v4z M10 20h4',refugios:'M12 22s8-9 8-14a8 8 0 1 0-16 0c0 5 8 14 8 14z M15 9a3 3 0 1 1-6 0 3 3 0 0 1 6 0',contactos:'M5 3h4l2 5-3 2q2 5 6 6l2-3 5 2v4q0 3-4 2Q4 18 3 6z',guia:'M3 5q5-2 9 1 4-3 9-1v14q-5-2-9 1-4-3-9-1z M12 6v14',coord:'M4 5h16v16H4z M8 9h8 M8 13h8 M8 17h5',rutas:'M4 20 9 5l6 14 5-12 M7 12h5 M14 15h5'};
 paths.mapa=paths.refugios;paths.planes=paths.guia;
 const icon=k=>'<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="'+paths[k]+'"/></svg>';
-const labels={inicio:'Inicio',avisos:'Avisos',mapa:'Mi ciudad',refugios:'Refugios',guia:'Mi plan',contactos:'Contactos'};
+const labels={inicio:'Inicio',avisos:'Avisos',mapa:'Mi ciudad',rutas:'Rutas',refugios:'Refugios',guia:'Mi plan',contactos:'Contactos'};
 const towns=['San Pedro Cholula','Atempan'];
 const places=[
 ['Refugio temporal de Cholula','Av. 14 Poniente 307, Centro',0,'Abierto','Rampa de entrada y sanitarios accesibles.'],
@@ -11,8 +11,44 @@ const places=[
 ['Esc. Manuel Acuña Hernández','Av. Benito Juárez 147, Tacopan',1,'Sin confirmar','Capacidad nominal de 250 personas.']];
 let town=1,mode='mapa',zoom=1,incident=null;
 let hazardLayer='rain',selectedZone='Atempan';
+let roadReports=[],roadBlocked=[],roadMode='cargando',roadLoading=false,routeDestination=null;
 let revision='',connection='Cargando registro municipal…';
 const hosted=location.protocol!=='file:';
+const streetCatalog=[
+  [['cholula-14','Av. 14 Poniente'],['cholula-morelos','Av. Morelos'],['cholula-recta','Recta a Cholula'],['cholula-forjadores','Blvd. Forjadores'],['cholula-periferico','Periférico Ecológico']],
+  [['atempan-129','Carretera Federal 129'],['atempan-tacopan','Camino a Tacopan'],['atempan-tlatlau','Camino a Tlatlauquitepec'],['atempan-centro','Acceso al centro'],['atempan-benito','Av. Benito Juárez']]
+];
+const routeCatalog=[
+  [
+    ['Cholula A','Av. 14 Poniente → Av. Morelos',['cholula-14','cholula-morelos']],
+    ['Cholula B','Recta a Cholula → Blvd. Forjadores',['cholula-recta','cholula-forjadores']],
+    ['Cholula C','Periférico Ecológico → Blvd. Forjadores',['cholula-periferico','cholula-forjadores']]
+  ],
+  [
+    ['Atempan A','Carretera Federal 129 → Acceso al centro',['atempan-129','atempan-centro']],
+    ['Atempan B','Camino a Tacopan → Acceso al centro',['atempan-tacopan','atempan-centro']],
+    ['Atempan C','Camino a Tlatlauquitepec → Carretera Federal 129',['atempan-tlatlau','atempan-129']]
+  ]
+];
+const hazardLabels={derrumbe:'Derrumbe o deslave',socavon:'Socavón',inundacion:'Inundación o corriente',obstruccion:'Calle obstruida',otro:'Otro peligro'};
+const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function localRoadReports(){try{const v=JSON.parse(localStorage.getItem('sicep.route-reports.v1')||'[]');return Array.isArray(v)?v:[]}catch{return[]}}
+async function refreshRoadReports(){
+  if(roadLoading)return;
+  roadLoading=true;let next,blocked,mode;
+  try{
+    if(!hosted)throw Error('local');
+    const response=await fetch('/api/routes',{cache:'no-store'});
+    if(!response.ok)throw Error('API no disponible');
+    const data=await response.json();next=data.reports||[];blocked=data.blocked||[];mode='compartido';
+  }catch{
+    next=localRoadReports();blocked=[...new Set(next.map(r=>r.town+':'+r.street))];mode='local';
+  }
+  roadLoading=false;
+  const changed=JSON.stringify(roadReports)!==JSON.stringify(next)||JSON.stringify(roadBlocked)!==JSON.stringify(blocked)||roadMode!==mode;
+  roadReports=next;roadBlocked=blocked;roadMode=mode;
+  if(changed&&location.hash==='#rutas')render();
+}
 async function sync(){
   if(!hosted){try{incident=JSON.parse(localStorage.getItem('sicep.demo.v1')||'{"stage":1,"count":35}')}catch{}connection='Ejercicio local';render();return}
   try{
@@ -169,23 +205,91 @@ function riskMap(){
   <section class="card map-card"><div class="map-shell risk-map-shell"><iframe title="Mapa de referencia del estado de Puebla" src="https://www.openstreetmap.org/export/embed.html?bbox=${bounds}&amp;layer=mapnik&amp;marker=${marker}"></iframe><div class="risk-markers" aria-label="Marcadores de riesgo simulado">${markers}</div><aside class="map-popup"><small>Zona seleccionada · ${current[6]}</small><h2>${current[0]}</h2><p>${layerNames[hazardLayer]}: <b class="risk-text-${selectedRisk[1]}">${selectedRisk[0]} · simulación</b></p><small>Referencia territorial; no representa una alerta vigente ni una medición en tiempo real.</small></aside><div class="map-live-pill simulation-pill"><span aria-hidden="true">●</span> SIMULACIÓN · Puebla</div></div><p class="map-method"><b>Cómo leerlo:</b> los colores son un escenario para el prototipo. Lluvia: prioriza la mayor concurrencia de susceptibilidades del norte y centro-norte señalada por Protección Civil. Sismos: toma como referencia la clasificación municipal del Plan Sismo. Volcán: representa cercanía a las zonas de peligro del mapa de CENAPRED. Confirma siempre con autoridades.</p><div class="map-sources"><a href="${monitors[0][4]}" target="_blank" rel="noopener noreferrer">Mapa de peligro volcánico CENAPRED ↗</a><a href="${monitors[1][4]}" target="_blank" rel="noopener noreferrer">Mapa hidrometeorológico estatal ↗</a><a href="${monitors[2][4]}" target="_blank" rel="noopener noreferrer">Regionalización sísmica estatal ↗</a></div></section>`;
 }
 
+function routesPage(){
+  const blocked=new Set(roadBlocked);
+  const options=routeCatalog[town].filter(([,name,streets])=>streets.every(street=>!blocked.has(town+':'+street)));
+  const openDestinations=places.map((p,i)=>p[2]===town&&p[3]==='Abierto'?[p,i]:null).filter(Boolean);
+  if(!openDestinations.some(([,i])=>i===routeDestination))routeDestination=openDestinations[0]?.[1]??null;
+  const destinationName=routeDestination===null?'refugio por confirmar':places[routeDestination][0];
+  const destinations=openDestinations.map(([p,i])=>'<option value="'+i+'" '+(i===routeDestination?'selected':'')+'>'+escapeHTML(p[0])+'</option>').join('');
+  const streets=streetCatalog[town].map(([id,name])=>'<option value="'+id+'">'+escapeHTML(name)+'</option>').join('');
+  const modeNotice=roadMode==='compartido'
+    ?'<div class="route-storage shared">Reportes compartidos con el servidor municipal.</div>'
+    :'<div class="route-storage local">'+(hosted?'No se pudo conectar al registro compartido. Los reportes de esta sesión se guardan solo en este navegador.':'Modo demostración: los reportes se guardan solo en este navegador y no se comparten con otras personas.')+'</div>';
+  const list=roadReports.filter(r=>Number(r.town)===town).slice(0,30);
+  const reportRows=list.length?list.map(r=>{
+    const street=(streetCatalog[Number(r.town)]||[]).find(s=>s[0]===r.street)?.[1]||r.street;
+    const photo=r.photo|| (r.hasPhoto&&roadMode==='compartido'?'/api/routes/photo/'+encodeURIComponent(r.id):'');
+    const date=r.created?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(r.created)):'Reciente';
+    return '<article class="road-report"><div><span class="road-tag">'+escapeHTML(hazardLabels[r.hazard]||'Reporte ciudadano')+'</span><h3>'+escapeHTML(street)+'</h3><small>'+escapeHTML(date)+' · Pendiente de verificación municipal</small>'+(r.note?'<p>'+escapeHTML(r.note)+'</p>':'')+'</div>'+(photo?'<a class="road-photo-link" href="'+escapeHTML(photo)+'" target="_blank" rel="noopener"><img class="road-photo" src="'+escapeHTML(photo)+'" alt="Foto adjunta al reporte de '+escapeHTML(street)+'" loading="lazy"></a>':'')+'</article>';
+  }).join(''):'<p class="muted">Aún no hay reportes de calle para '+escapeHTML(towns[town])+'.</p>';
+  const routeCards=options.length?options.map(([name,description,segments])=>'<article class="route-option"><span class="route-ok">● Alternativa disponible en el ejercicio</span><h3>'+escapeHTML(description)+'</h3><small>Corredor '+escapeHTML(name.slice(-1))+' · Destino: '+escapeHTML(destinationName)+'</small></article>').join(''):'<div class="route-empty"><b>No quedan corredores de referencia disponibles.</b><p>Los tramos configurados tienen reportes activos. Consulta a Protección Civil para indicaciones.</p></div>';
+  const loading=roadMode==='cargando';
+  return back()+'<div class="map-heading"><div><small class="kicker">Orientación ante emergencias</small><h1>Rutas</h1></div>'+select()+'</div>'+
+  '<section class="route-alert"><b>Rutas de referencia para el ejercicio</b><p>Si una persona reporta un peligro en un tramo, ese tramo se excluye automáticamente de las alternativas sugeridas para este municipio. Los reportes ciudadanos son provisionales: confirma condiciones y sigue las instrucciones oficiales. No es navegación en tiempo real.</p></section>'+
+  modeNotice+
+  '<section class="route-section"><div class="route-section-head"><div><small>Alternativas</small><h2>Corredores sugeridos</h2></div><label>Refugio destino<select id="route-destination">'+destinations+'</select></label></div>'+
+  (loading?'<p role="status" class="card">Consultando reportes de calles antes de sugerir rutas…</p>':'<div class="route-options">'+routeCards+'</div>')+
+  '<p class="route-explainer">El prototipo usa corredores de referencia definidos para San Pedro Cholula y Atempan; no calcula tiempos ni verifica el estado actual del camino.</p></section>'+
+  '<section class="route-section"><small>Colabora con tu comunidad</small><h2>Reportar una calle peligrosa</h2><p>Indica el tramo y qué observaste. Una foto es opcional; el reporte lo retirará de las sugerencias del ejercicio mientras se revisa.</p>'+
+  '<form id="route-report-form" class="route-form"><label>Tramo afectado<select name="street" required>'+streets+'</select></label><label>Tipo de situación<select name="hazard" required>'+Object.entries(hazardLabels).map(([id,name])=>'<option value="'+id+'">'+name+'</option>').join('')+'</select></label><label>Descripción breve <span class="muted">(opcional)</span><textarea name="note" maxlength="350" rows="3" placeholder="Describe lo que observaste, sin incluir datos personales"></textarea></label><label>Foto <span class="muted">(opcional)</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp"></label><small class="route-privacy">La foto se compartirá junto con el reporte. Evita mostrar rostros, placas o información privada.</small><button type="submit" '+(loading?'disabled':'')+'>Enviar reporte</button><p class="route-form-status" role="status" aria-live="polite"></p></form></section>'+
+  '<section class="route-section"><div class="route-section-head"><div><small>Incidentes reportados</small><h2>Tramos que se están evitando</h2></div><button type="button" class="route-refresh" data-refresh-routes>Actualizar</button></div><div class="road-report-list">'+list+'</div></section>'+
+  '<p class="route-disclaimer">La app no confirma cierres oficiales ni reemplaza a Protección Civil. Si hay peligro inmediato, aléjate y llama al 911.</p>';
+}
+
+async function compressRoutePhoto(file){
+  if(!file)return null;
+  if(!/^image\/(jpeg|png|webp)$/.test(file.type))throw Error('Elige una foto JPG, PNG o WebP.');
+  if(file.size>10*1024*1024)throw Error('La foto debe pesar menos de 10 MB.');
+  const bitmap=await createImageBitmap(file);
+  const scale=Math.min(1,1200/Math.max(bitmap.width,bitmap.height));
+  const canvas=document.createElement('canvas');canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);
+  const context=canvas.getContext('2d');context.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
+  let quality=.72,blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality));
+  while(blob&&blob.size>110*1024&&quality>.42){quality-=.08;blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality))}
+  if(!blob||blob.size>145*1024)throw Error('No se pudo reducir la foto lo suficiente. Prueba con una imagen más pequeña.');
+  return await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('No se pudo leer la foto.'));reader.readAsDataURL(blob)});
+}
+async function submitRoadReport(form){
+  const status=form.querySelector('.route-form-status'),button=form.querySelector('[type="submit"]');
+  button.disabled=true;status.textContent='Preparando el reporte…';
+  try{
+    const data=new FormData(form),file=data.get('photo'),photoFile=file&&file.size?file:null;
+    const report={town,street:String(data.get('street')),hazard:String(data.get('hazard')),note:String(data.get('note')||'').trim(),photo:await compressRoutePhoto(photoFile)};
+    if(!streetCatalog[town].some(([id])=>id===report.street)||!Object.hasOwn(hazardLabels,report.hazard))throw Error('Selecciona un tramo y un tipo de situación válidos.');
+    if(roadMode==='compartido'){
+      const response=await fetch('/api/routes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(report)});
+      if(!response.ok)throw Error(response.status===413?'La foto es demasiado grande. Prueba con otra imagen.':'No se pudo guardar el reporte compartido. Inténtalo de nuevo.');
+      const result=await response.json();roadReports=result.reports||roadReports;roadBlocked=result.blocked||roadBlocked;roadMode='compartido';
+    }else{
+      report.created=new Date().toISOString();report.id='local-'+Date.now();
+      const updated=[report,...localRoadReports()];
+      try{localStorage.setItem('sicep.route-reports.v1',JSON.stringify(updated))}catch{throw Error('No hay espacio local para guardar la foto. Prueba sin foto.')}
+      roadReports=updated;roadBlocked=[...new Set(updated.map(r=>r.town+':'+r.street))];
+    }
+    render();
+  }catch(error){button.disabled=false;status.textContent=error.message||'No se pudo enviar el reporte.'}
+}
+
 const actionCards = {
   avisos: ['Consultar avisos', 'Boletines oficiales y avisos municipales'],
   refugios: ['Buscar refugios', 'Direcciones y disponibilidad del ejercicio'],
   mapa: ['Explorar mapa municipal', 'Ubica el municipio seleccionado'],
+  rutas: ['Consultar rutas', 'Alternativas y reportes de calles'],
   planes: ['Planes de Protección Civil', 'Consulta por tipo de emergencia'],
   contactos: ['Números de atención', 'Emergencias y denuncia anónima'],
   guia: ['Preparar a mi familia', 'Completa tu lista de preparación'],
   coord: ['Coordinación municipal', 'Consulta el expediente y las tareas de brigada']
 };
 const actionsByPage = {
-  inicio: ['avisos','refugios','mapa','planes','contactos','guia'],
+  inicio: ['avisos','refugios','mapa','rutas','planes','contactos','guia'],
   avisos: ['mapa','refugios','planes'],
   refugios: ['mapa','avisos','contactos'],
   detalle: ['refugios','mapa','contactos'],
   guia: ['planes','refugios','contactos'],
   contactos: ['avisos','refugios','guia'],
-  mapa: ['avisos','refugios','contactos'],
+  mapa: ['avisos','rutas','refugios'],
+  rutas: ['mapa','refugios','contactos'],
   planes: ['guia','avisos','refugios'],
   coord: ['refugios','mapa','avisos']
 };
@@ -233,12 +337,12 @@ function paintBulletins(){
   if(bulletinData && !bulletinData.items.length)list.append('Sin coincidencias en la portada consultada. ');
 }
 function render(){let [page,id]=(location.hash.slice(1)||'inicio').split('/');document.querySelector('#nav').innerHTML=Object.entries(labels).map(([k,v])=>'<a class="'+(k===(page==='detalle'?'refugios':page)?'on':'')+'" href="#'+k+'">'+icon(k)+v+'</a>').join('');let content;
-switch(page){case 'refugios':content=shelters();break;case 'detalle':content=detail(Number(id));break;case 'coord':town=1;content=coordination();break;case 'avisos':content=back()+'<h1>Avisos municipales</h1>'+select()+'<section class="card notice"><small>'+alerts[town][2]+'</small><h2>'+alerts[town][0]+'</h2><p>'+alerts[town][1]+'</p><p>Consulta la información oficial vigente en el portal estatal.</p>'+source+'</section><a class="link" href="#refugios">Ver refugios de '+towns[town]+'</a>';break;case 'contactos':content=contacts();break;case 'mapa':content=riskMap();break;case 'planes':content=plans(id);break;case 'guia':content=preparation();break;default:page='inicio';content=home()}
+switch(page){case 'refugios':content=shelters();break;case 'detalle':content=detail(Number(id));break;case 'coord':town=1;content=coordination();break;case 'avisos':content=back()+'<h1>Avisos municipales</h1>'+select()+'<section class="card notice"><small>'+alerts[town][2]+'</small><h2>'+alerts[town][0]+'</h2><p>'+alerts[town][1]+'</p><p>Consulta la información oficial vigente en el portal estatal.</p>'+source+'</section><a class="link" href="#refugios">Ver refugios de '+towns[town]+'</a>';break;case 'contactos':content=contacts();break;case 'mapa':content=riskMap();break;case 'rutas':content=routesPage();break;case 'planes':content=plans(id);break;case 'guia':content=preparation();break;default:page='inicio';content=home()}
 if(page==='inicio')content+=bulletinPanel();
 if(page==='avisos')content+=bulletinPanel();
 if(page!=='inicio')content+=actionPanel(page);
-app.innerHTML=page==='inicio'?content:'<div class="sheet">'+content+'</div>';paintBulletins();document.title=(labels[page]||'Protección civil')+' · SICEP Puebla'}
-app.addEventListener('change',e=>{if(e.target.id==='town'){town=Number(e.target.value);selectedZone=towns[town];zoom=1;render()}});
+app.innerHTML=page==='inicio'?content:'<div class="sheet">'+content+'</div>';paintBulletins();document.title=(labels[page]||'Protección civil')+' · SICEP Puebla';if(page==='rutas'&&roadMode==='cargando')refreshRoadReports()}
+app.addEventListener('change',e=>{if(e.target.id==='town'){town=Number(e.target.value);selectedZone=towns[town];zoom=1;routeDestination=null;render()}if(e.target.id==='route-destination'){routeDestination=Number(e.target.value);render()}});
 app.addEventListener('change',e=>{
   if(e.target.dataset.prep===undefined)return;
   const index=Number(e.target.dataset.prep);
@@ -249,11 +353,11 @@ app.addEventListener('change',e=>{
   try{localStorage.setItem('sicep.prepared',JSON.stringify(prepared))}
   catch{status.textContent+=' · El navegador no pudo guardar el avance.'}
 });
-app.addEventListener('submit',e=>{e.preventDefault();update(1,Number(new FormData(e.target).get('count')))});
-app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.layer){hazardLayer=b.dataset.layer;render()}if(b.dataset.zone){selectedZone=b.dataset.zone;render()}if(b.dataset.mode){mode=b.dataset.mode;render()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
+app.addEventListener('submit',e=>{e.preventDefault();if(e.target.id==='route-report-form'){submitRoadReport(e.target);return}update(1,Number(new FormData(e.target).get('count')))});
+app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.refreshRoutes!==undefined)refreshRoadReports();if(b.dataset.layer){hazardLayer=b.dataset.layer;render()}if(b.dataset.zone){selectedZone=b.dataset.zone;render()}if(b.dataset.mode){mode=b.dataset.mode;render()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
 window.addEventListener('hashchange',()=>{render();scrollTo(0,0)});render();
 
-sync();if(hosted)setInterval(()=>{if(!document.hidden)sync()},15000);
+sync();if(hosted)setInterval(()=>{if(!document.hidden){sync();if(location.hash==='#rutas')refreshRoadReports()}},15000);
 
 const fallbackBulletins={
   "items": [
