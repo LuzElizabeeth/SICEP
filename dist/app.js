@@ -8,8 +8,24 @@ const places=[
 ['Refugio Deportivo Santiago','Calle 9 Norte s/n, Barrio de Santiago',0,'Abierto','Accesibilidad pendiente de confirmar.'],
 ['Auditorio Municipal','Palacio Municipal',1,'Abierto','Acceso verificado en el ejercicio. Capacidad nominal de 500 personas.'],
 ['Esc. 1º de enero','2 Sur y 3 Oriente',1,'Acceso bloqueado','Capacidad nominal de 300 personas.'],
-['Esc. Manuel Acuña Hernández','Av. Benito Juárez 147, Tacopan',1,'Sin confirmar','Capacidad nominal de 250 personas.']];
-let town=1,mode='mapa',zoom=1,incident=null;
+['Esc. Manuel Acuña Hernández','Av. Benito Juárez 147, Tacopan',1,'Sin confirmar','Capacidad nominal de 250 personas.'],
+['Esc. Ignacio Zaragoza','Ignacio Zaragoza #2',1,'Sin confirmar','Capacidad nominal de 400 personas.'],
+['Esc. Benito Juárez','Ignacio Zaragoza #1',1,'Sin confirmar','Capacidad nominal de 300 personas.'],
+['Esc. Primaria Lic. Adolfo López Mateos','Domicilio conocido',2,'Sin confirmar','Capacidad nominal de 50 personas.'],
+['Esc. Primaria de Cuautieco','Domicilio conocido',2,'Sin confirmar','Capacidad nominal de 100 personas.'],
+['Auditorio Municipal de El Terrero','Domicilio conocido',2,'Sin confirmar','Capacidad nominal de 200 personas.']];
+const shelterTowns=[...towns,'Aquixtla'];
+const ruralShelters={
+  5:{locality:'Apatauyan',point:[19.8031536,-97.443235]},
+  6:{locality:'Tezhuatepec',point:[19.8113283,-97.4625536]},
+  7:{locality:'Chichicaxtla',point:[19.7443775,-97.9717225]},
+  8:{locality:'Cuautieco',point:[19.7841914,-97.9232736]},
+  9:{locality:'El Terrero',point:[19.7868419,-97.95361]},
+};
+const shelterPlan='https://proteccioncivil.puebla.gob.mx/images/site/planes/PLAN-HIDROMETEOROLOGICO.pdf';
+const shelterMunicipality=()=>shelterTown??town;
+let town=1,mode='lista',zoom=1,incident=null;
+let shelterQuery='',shelterStatus='',shelterTown=null,shelterMapId=null;
 let hazardLayer='rain',selectedZone='Atempan';
 let roadReports=[],roadBlocked=[],roadMode='cargando',roadLoading=false,routeDestination=null,routeOrigin=null,routeOriginLabel='Centro del municipio · aproximado',routeReportPoint=null,routeMapMode='origin',demoHazard=null,routeResult=null,routeMapInstance=null,routeMapLayers=null,routeRequestId=0;
 let revision='',connection='Cargando registro municipal…';
@@ -44,7 +60,7 @@ async function sync(){
     const changed=revision!==data.updated || connection!=='Registro municipal compartido';
     revision=data.updated;incident=data;connection='Registro municipal compartido';
     if(changed)render();
-  }catch{connection='Registro municipal sin conexión';render()}
+  }catch{if(connection!=='Registro municipal sin conexión'){connection='Registro municipal sin conexión';render()}}
 }
 async function update(stage,count){
   if(!hosted){incident={stage,count,updated:new Date().toISOString()};localStorage.setItem('sicep.demo.v1',JSON.stringify(incident));render();return}
@@ -351,9 +367,111 @@ function home(){
   <section class="card"><small>Catálogo y reporte de campo</small><h2>Disponibilidad de refugios</h2>${rows}<a class="link" href="#refugios">Consultar directorio y mapa</a></section>
   <div class="tiles">${tile('contactos','Contactos','Directorio de emergencia')}${tile('coord','Coordinación','Mesa municipal de Atempan')}</div>`;
 }
-function shelters(){let rows=places.map((p,i)=>p[2]===town?'<a class="row" href="#detalle/'+i+'"><span class="icon">'+icon('inicio')+'</span><div><b>'+p[0]+'</b><span class="muted">'+p[1]+'</span></div><span style="margin-left:auto">'+pill(p[3])+'</span></a>':'').join('');
-return back()+'<small style="display:block">Directorio de demostración</small><h1>Refugios temporales</h1>'+select()+'<div class="segment">'+['mapa','lista'].map(m=>'<button data-mode="'+m+'" aria-pressed="'+(m===mode)+'">'+(m==='mapa'?'Mapa':'Lista')+'</button>').join('')+'</div>'+(mode==='mapa'?(town===0?'<div class="map"><div class="mapinner" style="transform:scale('+zoom+')">'+[[0,54,10],[1,17,46]].map(([i,x,y])=>'<a class="pin" href="#detalle/'+i+'" aria-label="'+places[i][0]+'" style="left:'+x+'%;top:'+y+'%"></a>').join('')+'</div><div class="zoom"><button data-zoom="1" aria-label="Acercar">+</button><button data-zoom="-1" aria-label="Alejar">−</button></div></div><span class="muted">Mapa ilustrativo · Selecciona un refugio.</span>':'<p class="card">Ubicaciones pendientes de verificar. Consulta las direcciones del directorio.</p>'):'')+'<h2 style="margin-top:16px">'+(town===0?2:3)+' refugios en '+towns[town]+'</h2><div class="stack">'+rows+'</div>'}
-function detail(id){let p=places[id];if(!p)return shelters();town=p[2];return back('refugios','Refugios')+'<div>'+pill(p[3])+'</div><h1>'+p[0]+'</h1><div class="card"><h3>Dirección</h3><p>'+p[1]+', '+towns[town]+', Puebla.</p><h3>Acceso y capacidad</h3><p>'+p[4]+(id===2?' Cupo del ejercicio: '+(40-(incident?.stage>=2?incident.count:0))+'.':'')+'</p><h3>Última actualización</h3><p>Registro de demostración.</p></div><a class="btn" href="https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(p[1]+', '+towns[town]+', Puebla, México')+'" target="_blank" rel="noopener">Cómo llegar · Google Maps</a><p class="muted">Dirección de ejemplo. Verifica la ubicación antes de trasladarte.</p>'}
+function shelterCapacity(id){
+  if(id!==2||!incident)return 'Cupo disponible por confirmar';
+  const available=Math.max(0,40-(incident.stage>=2?incident.count:0));
+  return available===1?'1 lugar disponible en la simulación':available+' lugares disponibles en la simulación';
+}
+
+function shelterBadge(status){
+  return `<span class="pill shelter-badge" data-status="${status}">${status}</span>`;
+}
+
+function shelterResults(){
+  const normalize=value=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const query=normalize(shelterQuery.trim());
+  const municipality=shelterMunicipality();
+  const matches=places.map((place,id)=>({place,id})).filter(({place,id})=>
+    place[2]===municipality && (!shelterStatus||place[3]===shelterStatus) &&
+    normalize([place[0],place[1],ruralShelters[id]?.locality].join(' ')).includes(query)
+  );
+  const count=matches.length;
+  const map=mode==='mapa' && count>0 ? shelterMap(matches) : '';
+  return `
+    <p class="shelter-count" role="status">${count} ${count===1?'refugio':'refugios'} en ${shelterTowns[municipality]}</p>
+    ${map}
+    ${count===0?'<div class="card shelter-empty"><h2>Sin coincidencias</h2><p>Prueba otro nombre o cambia el filtro de estado.</p><button type="button" data-clear-shelters>Limpiar filtros</button></div>':
+    `<ul class="shelter-list">${matches.map(({place,id})=>`
+      <li><a class="row shelter-card" href="#detalle/${id}">
+        <span class="icon">${icon('refugios')}</span>
+        <div class="shelter-info"><h2>${place[0]}</h2><p>${ruralShelters[id] ? ruralShelters[id].locality+' · ' : ''}${place[1]}</p><p class="shelter-capacity">${shelterCapacity(id)}</p></div>
+        ${shelterBadge(place[3])}
+      </a></li>`).join('')}</ul>`}
+  `;
+}
+
+function shelterMap(matches){
+  if(shelterMunicipality()!==0){
+    const selected=matches.find(({id})=>id===shelterMapId)||matches[0];
+    const {id,place}=selected;
+    const rural=ruralShelters[id];
+    const address=[place[1],shelterTowns[place[2]],'Puebla, México'].join(', ');
+    const marker=encodeURIComponent(rural?rural.point.join(','):address);
+    const label=rural?rural.locality:place[0];
+    return `<section class="card shelter-map-card" aria-label="Mapa de refugios">
+      <label>Punto en el mapa<select id="shelter-map-point">
+      ${matches.map(({id:optionId,place:option})=>`<option value="${optionId}"${optionId===id?' selected':''}>${ruralShelters[optionId]?.locality ? ruralShelters[optionId].locality+' · ' : ''}${option[0]}</option>`).join('')}
+      </select></label>
+      <iframe title="Mapa de ${label}" src="https://maps.google.com/maps?q=${marker}&amp;z=15&amp;output=embed" loading="lazy" referrerpolicy="no-referrer"></iframe>
+      <p class="shelter-map-hint">${rural?'El marcador señala el centro de la localidad. Confirma la ubicación exacta del inmueble con Protección Civil.':'Ubicación de referencia. Confirma la dirección con Protección Civil.'}</p>
+      <a class="link" href="https://www.google.com/maps/search/?api=1&amp;query=${marker}" target="_blank" rel="noopener">Abrir mapa de ${label}</a>
+    </section>`;
+  }
+  const pins=[[0,54,10],[1,17,46]].filter(([id])=>matches.some(match=>match.id===id));
+  return `<div class="map"><div class="mapinner" style="transform:scale(${zoom})">
+    ${pins.map(([id,x,y])=>`<a class="pin shelter-pin" href="#detalle/${id}" aria-label="${places[id][0]}" style="left:${x}%;top:${y}%">${icon('refugios')}</a>`).join('')}
+    </div><div class="zoom"><button type="button" data-zoom="1" aria-label="Acercar">+</button><button type="button" data-zoom="-1" aria-label="Alejar">−</button></div>
+  </div><p class="hint shelter-map-hint">Mapa ilustrativo de San Pedro Cholula.</p>`;
+}
+
+function shelters(){
+  const options=['Abierto','Acceso bloqueado','Sin confirmar'];
+  return `${back()}
+    <div class="shelter-intro"><span class="kicker">Directorio de demostración</span>
+    <h1>Refugios temporales</h1>
+    <p>Encuentra refugios por municipio o comunidad y ubícalos en el mapa.</p></div>
+    <p class="shelter-source">Los registros rurales provienen del plan estatal. Consulta con Protección Civil si están habilitados antes de trasladarte. <a class="link" href="${shelterPlan}" target="_blank" rel="noopener">Ver plan estatal</a></p>
+    <div class="card shelter-filters" aria-label="Filtros del directorio" role="group">
+      <label>Municipio<select id="shelter-town">${shelterTowns.map((name,index)=>`<option value="${index}"${index===shelterMunicipality()?' selected':''}>${name}</option>`).join('')}</select></label>
+      <label>Buscar refugio<input id="shelter-query" type="search" placeholder="Nombre, localidad o dirección" value="${escapeHTML(shelterQuery)}"></label>
+      <label>Estado<select id="shelter-status"><option value="">Todos los estados</option>
+        ${options.map(status=>`<option${status===shelterStatus?' selected':''}>${status}</option>`).join('')}</select></label>
+    </div>
+    <div class="segment shelter-view" role="group" aria-label="Vista del directorio">
+      <button type="button" data-mode="lista" aria-pressed="${mode==='lista'}">Lista</button>
+      <button type="button" data-mode="mapa" aria-pressed="${mode==='mapa'}">Mapa</button>
+    </div>
+    <div id="shelter-results">${shelterResults()}</div>`;
+}
+
+function detail(id){
+  const place=places[id];
+  if(!place)return shelters();
+  shelterTown=place[2];
+  if(place[2]<towns.length && place[2]!==town)changeMunicipality(place[2]);
+  const rural=ruralShelters[id];
+  const address=[place[1],rural?.locality,shelterTowns[place[2]],'Puebla, México'].filter(Boolean).join(', ');
+  const directions='https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(address);
+  const access={
+    'Abierto':'Confirma el acceso con las autoridades antes de trasladarte.',
+    'Acceso bloqueado':'El acceso está bloqueado en el ejercicio. Consulta otros refugios del municipio.',
+    'Sin confirmar':'El acceso está pendiente de confirmar en el ejercicio.',
+  };
+  return `${back('refugios','Refugios')}
+    <div class="shelter-intro"><span class="kicker">Directorio de demostración</span><h1>${place[0]}</h1>${shelterBadge(place[3])}</div>
+    <div class="card shelter-detail">
+      <h2>Dirección</h2><p>${address}</p>
+      ${rural? `<a class="link" href="${shelterPlan}" target="_blank" rel="noopener">Consultar ficha en el plan estatal</a>` : ''}
+      <h2>Acceso y capacidad</h2><p>${access[place[3]]}</p>
+      <p>${place[4]}</p><p class="shelter-capacity">${shelterCapacity(id)}</p>
+    </div>
+    ${place[3]==='Abierto'? `<a class="btn" href="${directions}" target="_blank" rel="noopener">Ver dirección en Google Maps</a>` :
+      '<a class="btn" href="#refugios">Consultar otros refugios</a>'}`;
+}
+
+function refreshShelterResults(){
+  document.querySelector('#shelter-results').innerHTML=shelterResults();
+}
 const source='<a class="link" target="_blank" rel="noopener" href="https://proteccioncivil.puebla.gob.mx/">Protección Civil del Estado de Puebla</a>';
 function coordination(){let stage=incident?.stage||0;return back()+'<small style="display:block">Simulación municipal · Atempan</small><h1>Coordinación de brigadas</h1><p>Practica la atención de una inundación. '+connection+'.</p><div class="card">'+(!stage?'<form id="report"><h2>Registrar incidente</h2><p>Inundación en Atempan</p><label>Personas que necesitan alojamiento<input type="number" name="count" min="1" max="9999" value="35" required></label><button>Registrar y revisar propuesta</button></form>':'<small>Folio SICEP-AT-001</small><h2>Inundación en Atempan</h2><p>'+incident.count+' personas requieren alojamiento.</p>'+(stage===1?(incident.count<=40?'<h3>Propuesta · Auditorio Municipal</h3><p>El acceso está verificado y los 40 lugares del ejercicio cubren la solicitud. Los otros refugios tienen acceso bloqueado o pendiente de confirmar.</p><button data-step="2">Confirmar asignación a brigada</button>':'<p>Los 40 lugares disponibles son insuficientes. Se requiere coordinación adicional.</p>'):stage===2?'<h3>Asignación confirmada</h3><p>Brigada municipal: recibe la asignación al Auditorio Municipal para '+incident.count+' personas.</p><button data-step="3">Acusar recibo como brigada</button>':'<h3>Brigada enterada</h3><p>Acuse registrado para el Auditorio Municipal.</p>')+'<p><button class="segment" data-step="0">Reiniciar ejercicio</button></p>')+'</div>'}
 let bulletinData=null;
@@ -381,7 +499,38 @@ if(page==='inicio')content+=bulletinPanel();
 if(page==='avisos')content+=bulletinPanel();
 if(page!=='inicio')content+=actionPanel(page);
 app.innerHTML=page==='inicio'?content:'<div class="sheet">'+content+'</div>';paintBulletins();document.title=(labels[page]||'Protección civil')+' · SICEP Puebla';if(page==='rutas'){initializeRouteMap();if(roadMode==='cargando')refreshRoadReports()}}
-app.addEventListener('change',e=>{if(e.target.id==='town'){town=Number(e.target.value);selectedZone=towns[town];zoom=1;routeDestination=null;routeOrigin=[...townCenters[town]];routeOriginLabel='Centro del municipio · aproximado';routeReportPoint=null;demoHazard=null;render()}if(e.target.id==='route-destination'){routeDestination=Number(e.target.value);render()}});
+function changeMunicipality(value){
+  town=value;
+  selectedZone=towns[town];
+  zoom=1;
+  routeDestination=null;
+  routeOrigin=[...townCenters[town]];
+  routeOriginLabel='Centro del municipio · aproximado';
+  routeReportPoint=null;
+  demoHazard=null;
+  routeResult=null;
+}
+app.addEventListener('input',event=>{
+  if(event.target.id!=='shelter-query')return;
+  shelterQuery=event.target.value;
+  refreshShelterResults();
+});
+app.addEventListener('change',event=>{
+  const {id,value}=event.target;
+  if(id==='shelter-town'){
+    shelterTown=Number(value);
+    if(shelterTown<towns.length && shelterTown!==town)changeMunicipality(shelterTown);
+    shelterMapId=null;
+    zoom=1;
+  }else if(id==='shelter-map-point'){
+    shelterMapId=Number(value);
+  }else if(id==='shelter-status'){
+    shelterStatus=value;
+  }else{return}
+  refreshShelterResults();
+  if(id==='shelter-map-point')document.querySelector('#shelter-map-point').focus();
+});
+app.addEventListener('change',e=>{if(e.target.id==='town'){shelterTown=null;changeMunicipality(Number(e.target.value));render();document.querySelector('#town')?.focus()}if(e.target.id==='route-destination'){routeDestination=Number(e.target.value);render()}});
 app.addEventListener('change',e=>{
   if(e.target.dataset.prep===undefined)return;
   const index=Number(e.target.dataset.prep);
@@ -393,7 +542,7 @@ app.addEventListener('change',e=>{
   catch{status.textContent+=' · El navegador no pudo guardar el avance.'}
 });
 app.addEventListener('submit',e=>{e.preventDefault();if(e.target.id==='route-report-form'){submitRoadReport(e.target);return}update(1,Number(new FormData(e.target).get('count')))});
-app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.refreshRoutes!==undefined)refreshRoadReports();if(b.dataset.routeMode){routeMapMode=b.dataset.routeMode;render()}if(b.hasAttribute('data-route-location')){if(!navigator.geolocation){alert('Este navegador no permite compartir ubicación.');return}navigator.geolocation.getCurrentPosition(position=>{routeOrigin=[position.coords.latitude,position.coords.longitude];routeOriginLabel='Mi ubicación actual';routeMapMode='origin';render()},()=>alert('No se pudo obtener la ubicación. Puedes marcar la salida tocando el mapa.'),{enableHighAccuracy:true,timeout:10000,maximumAge:60000})}if(b.dataset.scenario){if(b.dataset.scenario==='clear')demoHazard=null;else{const route=routeResult?.routes?.[0];if(route?.geometry?.coordinates?.length){const point=route.geometry.coordinates[Math.floor(route.geometry.coordinates.length*.55)];demoHazard={id:'demo-'+Date.now(),town,latitude:point[1],longitude:point[0],lat:point[1],lon:point[0],hazard:'derrumbe',severity:'high',impact:'blocked',note:'Escenario sintético de demostración'}}else{alert('Espera a que se calcule una ruta para probar el reporte.');return}}render()}if(b.dataset.layer){hazardLayer=b.dataset.layer;render()}if(b.dataset.zone){selectedZone=b.dataset.zone;render()}if(b.dataset.mode){mode=b.dataset.mode;render()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
+app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.refreshRoutes!==undefined)refreshRoadReports();if(b.dataset.routeMode){routeMapMode=b.dataset.routeMode;render()}if(b.hasAttribute('data-route-location')){if(!navigator.geolocation){alert('Este navegador no permite compartir ubicación.');return}navigator.geolocation.getCurrentPosition(position=>{routeOrigin=[position.coords.latitude,position.coords.longitude];routeOriginLabel='Mi ubicación actual';routeMapMode='origin';render()},()=>alert('No se pudo obtener la ubicación. Puedes marcar la salida tocando el mapa.'),{enableHighAccuracy:true,timeout:10000,maximumAge:60000})}if(b.dataset.scenario){if(b.dataset.scenario==='clear')demoHazard=null;else{const route=routeResult?.routes?.[0];if(route?.geometry?.coordinates?.length){const point=route.geometry.coordinates[Math.floor(route.geometry.coordinates.length*.55)];demoHazard={id:'demo-'+Date.now(),town,latitude:point[1],longitude:point[0],lat:point[1],lon:point[0],hazard:'derrumbe',severity:'high',impact:'blocked',note:'Escenario sintético de demostración'}}else{alert('Espera a que se calcule una ruta para probar el reporte.');return}}render()}if(b.dataset.layer){hazardLayer=b.dataset.layer;render()}if(b.dataset.zone){selectedZone=b.dataset.zone;render()}if(b.dataset.clearShelters!==undefined){shelterQuery='';shelterStatus='';render();document.querySelector('#shelter-query').focus()}if(b.dataset.mode){mode=b.dataset.mode;render();document.querySelector('[data-mode="'+mode+'"]').focus()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
 window.addEventListener('hashchange',()=>{render();scrollTo(0,0)});render();
 
 sync();if(hosted)setInterval(()=>{if(!document.hidden){sync();if(location.hash==='#rutas')refreshRoadReports()}},15000);

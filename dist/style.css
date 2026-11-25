@@ -53,3 +53,44 @@
 /* Mapa de calles para sugerencias de trayecto */
 .route-map-tools{display:flex;gap:9px;flex-wrap:wrap;margin:12px 0 8px}.route-map-tools button{border:1px solid #d4c7cb;border-radius:9px;background:#fff;color:#51444a;padding:10px 14px;font:inherit;font-weight:700;cursor:pointer}.route-map-tools button.selected{background:#790a29;color:#fff;border-color:#790a29}.route-map-tools .route-location{margin-left:auto}.route-map-hint{font-size:.88rem;color:#625b5b;margin:5px 0 9px}.route-real-map{width:100%;height:clamp(390px,53vw,620px);border:1px solid #d8d1ca;border-radius:13px;z-index:0;background:#e7eceb}.route-real-map .leaflet-control-attribution{font-size:10px}.route-map-legend{padding:12px 2px}.route-map-legend .legend-fast,.route-map-legend .legend-safer,.route-map-legend .legend-hazard,.route-map-legend .legend-refuge{height:5px;width:24px;background:#3977bd;border-radius:5px}.route-map-legend .legend-safer{background:#159969}.route-map-legend .legend-hazard{height:12px;width:12px;border-radius:50%;background:#d9363e}.route-map-legend .legend-refuge{height:12px;width:12px;border-radius:50%;background:#790a29}.route-route-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:6px 0}.route-route-cards .route-warning{grid-column:1/-1}.route-option p{margin:5px 0}.route-safer-option{background:#f5fbf7;border-top-color:#159969}.route-empty{grid-column:1/-1}.route-service-note{font-size:.78rem;color:#686061;margin:8px 0}.route-map-tools button:focus-visible{outline:3px solid #ddaebe;outline-offset:2px}.route-marker{display:grid!important;place-items:center;border:2px solid #fff!important;border-radius:50%;color:#fff;text-align:center;font-size:16px;font-weight:800;box-shadow:0 2px 9px #17202a66}.origin-marker{background:#3977bd}.refuge-marker{background:#790a29}.route-point-summary{padding:10px 12px;background:#f7f3f4;border-radius:9px;color:#51444a}
 @media(max-width:760px){.route-real-map{height:clamp(350px,105vw,480px)}.route-map-tools{display:grid;grid-template-columns:1fr 1fr}.route-map-tools .route-location{grid-column:1/-1;margin:0}.route-route-cards{grid-template-columns:1fr}.route-route-cards .route-warning{grid-column:auto}.route-map-legend{gap:9px}.route-map-legend span{font-size:.74rem}}
+
+.shelter-intro{margin-bottom:20px}
+.shelter-intro p{color:#635b5f}
+.shelter-filters{display:grid;grid-template-columns:1fr 1.35fr 1fr;gap:14px;padding:16px}
+.shelter-filters label{font-size:.9rem;min-width:0}
+.shelter-filters input{min-width:0}
+.shelter-view{margin:18px 0 10px}
+.shelter-count{margin:0 0 12px;font-weight:700}
+.shelter-list{display:grid;gap:10px;list-style:none;margin:0;padding:0}
+.shelter-card{padding:16px;align-items:start}
+.shelter-card:hover{border-color:#b7788d;background:#fffafb}
+.shelter-card h2{font-size:1.08rem;letter-spacing:normal}
+.shelter-info{min-width:0;flex:1}
+.shelter-info p{color:#635b5f;font-size:.9rem}
+.shelter-capacity{font-weight:650;margin-top:6px}
+.shelter-badge{white-space:nowrap}
+.shelter-badge[data-status="Acceso bloqueado"]{color:#8b1534;background:#fae5eb}
+.shelter-badge[data-status="Sin confirmar"]{color:#704600;background:#fff0d6}
+.shelter-map-hint{margin:8px 0 14px;color:#635b5f;font-size:.9rem}
+.shelter-pin{display:grid;place-items:center;color:#790a29}
+.shelter-pin svg{box-sizing:content-box;border-radius:50%;padding:6px;background:white;border:1px solid currentColor}
+.shelter-detail{margin-bottom:16px}
+.shelter-detail h2{font-size:1.15rem}
+.shelter-empty button{margin-top:8px}
+.shelter-card:focus-visible,.shelter-view button:focus-visible,.shelter-filters :focus-visible{outline:2px solid #790a29;outline-offset:3px}
+@media(max-width:620px){
+  .shelter-filters{grid-template-columns:1fr 1fr}
+  .shelter-filters label:nth-child(2){grid-row:2;grid-column:1/-1}
+  .shelter-card{display:grid;grid-template-columns:auto 1fr;gap:6px 12px}
+  .shelter-card .shelter-badge{grid-column:2;justify-self:start}
+}
+@media(max-width:360px){.shelter-filters{grid-template-columns:1fr}}
+
+.shelter-intro h1{text-wrap:balance}
+.shelter-source{border-left:3px solid #a95b75;padding:10px 14px;margin:0 0 18px;background:#f6eeef;color:#52434a;font-size:.9rem}
+.shelter-source .link{display:inline-block}
+.shelter-map-card{margin-bottom:14px}
+.shelter-map-card label{max-width:100%;margin-bottom:12px}
+.shelter-map-card select{min-width:0}
+.shelter-map-card iframe{display:block;width:100%;height:clamp(280px,49vw,420px);border:0;border-radius:10px;background:#eeebe8}
+.shelter-map-card p{margin-top:10px}
