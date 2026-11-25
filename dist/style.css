@@ -143,7 +143,7 @@
 .home-section-head label{max-width:240px}
 .home-section-head h2,.home #bulletins h2{color:var(--home-ink);line-height:1.2}
 .home-actions ul,.home-shelter-list{list-style:none;padding:0;margin:0}
-.home-actions ul{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.home-actions ul{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .home-actions li a{display:flex;align-items:center;gap:10px;min-height:71px;padding:10px;border:1px solid var(--home-line);border-radius:12px;text-decoration:none;color:var(--home-ink);background:#fff}
 .home-actions li a:hover,.home-monitoring a:hover{background:#fff8fa;border-color:#b67b90}
 .home-actions li .icon{width:35px;height:35px;border-radius:8px}
@@ -159,12 +159,21 @@
 .home-metrics dd{margin:0;color:var(--home-wine);font-size:1.75rem;font-weight:750;line-height:1.15}
 .home-shelter-list .shelterLine{padding:9px 0}
 .home-shelter-list .shelterLine>span>span{display:block}
-.home-monitoring{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-.home-monitoring a{overflow:hidden;border:1px solid var(--home-line);border-radius:14px;background:white;color:var(--home-ink);text-decoration:none}
-.home-monitoring img{display:block;width:100%;height:clamp(100px,15vw,170px);object-fit:cover}
-.home-monitoring strong{display:block;padding:12px}
+.home-municipal{padding:clamp(16px,2.4vw,28px);border:1px solid var(--home-line);border-radius:16px;background:#fbf8f9}
+.home-territory-head{align-items:end;gap:14px 24px;flex-wrap:wrap}
+.home-territory-head .rural-filters{flex:0 1 460px}
+.home-updates{display:grid;grid-template-columns:minmax(0,2.25fr) minmax(0,1fr);gap:16px}
+.home-updates>section{min-width:0;margin:0}
+.home-monitoring-panel{display:flex;flex-direction:column}
+.home-monitoring{display:grid;grid-auto-rows:1fr;flex:1;gap:8px}
+.home-monitoring a{display:flex;align-items:center;overflow:hidden;border:1px solid var(--home-line);border-radius:10px;background:white;color:var(--home-ink);text-decoration:none}
+.home-monitoring img{display:block;width:86px;height:100%;min-height:62px;object-fit:cover;flex:none}
+.home-monitoring strong{padding:8px 12px}
+@media(max-width:850px){
+  .home-updates{grid-template-columns:minmax(0,1fr)}
+  .home-monitoring img{height:62px}
+}
 .home a:focus-visible{outline:2px solid var(--home-wine);outline-offset:3px}
-@media(max-width:900px){.home-actions ul{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:680px){
   .home-hero,.home-municipal-grid{grid-template-columns:1fr}
   .home-hero img{height:auto;object-fit:contain;mask-image:linear-gradient(to bottom,transparent,#000 15%)}
@@ -172,10 +181,7 @@
   .home-actions ul{grid-template-columns:repeat(2,minmax(0,1fr))}
   .home-section-head{align-items:center}
   .home-municipal .home-section-head{display:grid;align-items:start}
-  .home-municipal .home-section-head label{max-width:none}
-  .home-monitoring{grid-template-columns:1fr;gap:8px}
-  .home-monitoring a{display:flex;align-items:center}
-  .home-monitoring img{width:90px;height:64px;flex:none}
+  .home-territory-head .rural-filters{width:100%}
 }
 @media(max-width:380px){
   .home-section-head h2{font-size:1.35rem}
@@ -372,7 +378,6 @@
 .rural-filters{display:flex;flex-wrap:wrap;gap:10px 14px;flex:1 1 440px;min-width:0;max-width:620px}
 .rural-filters label{flex:1 1 180px;min-width:0;max-width:none}
 .rural-filters select{max-width:100%;min-width:0}
-.home-municipal>.rural-filters{margin-bottom:16px}
 .rural-home-links{display:flex;flex-wrap:wrap;gap:14px;margin-top:7px}
 .shelter-filters .rural-filters{grid-column:1/-1;max-width:none}
 @media(max-width:450px){.rural-filters label{flex-basis:100%}}
@@ -417,17 +422,21 @@
 .city-seismic-risk-medio{background:#fff3d6;border-color:#b48025;color:#644308}
 .city-seismic-risk-bajo{background:#e8f0f4;border-color:#306581;color:#234c63}
 
-.bulletin-story{display:flex;align-items:center;gap:18px;min-height:110px;margin:14px 0;padding:14px 0;border-block:1px solid var(--line,#ded4d8)}
-.bulletin-story img{width:clamp(80px,18vw,156px);aspect-ratio:4/3;object-fit:cover;border-radius:8px;flex:none}
-.bulletin-story h3{margin:4px 0}
-.bulletin-story p{margin:0;font-size:.94rem}
-.bulletin-story h3 a{color:inherit;text-decoration-color:#790a29;text-underline-offset:3px}
+.bulletin-track{display:grid;grid-auto-flow:column;grid-auto-columns:30%;gap:16px;overflow-x:auto;overscroll-behavior-inline:contain;scroll-snap-type:x mandatory;list-style:none;margin:16px 0;padding:2px 2px 10px}
+.bulletin-story{display:flex;min-width:0;scroll-snap-align:start;border-bottom:1px solid #ded4d8}
+.bulletin-story-link{display:flex;flex:1;flex-direction:column;min-width:0;color:inherit;text-decoration:none}
+.bulletin-photo{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:4px}
+.bulletin-photo-placeholder{display:grid;place-items:center;background:#790a29}
+.bulletin-photo-placeholder img{width:36%;max-height:78%;object-fit:contain}
+.bulletin-topic,.bulletin-date{font-size:.83rem;color:#635b5f}
+.bulletin-topic{margin-top:8px}
+.bulletin-story h3{margin:3px 0 12px;font-size:1.1rem;line-height:1.25}
+.bulletin-story-link:hover h3{text-decoration:underline;text-underline-offset:3px}
+.bulletin-date{margin-top:auto;padding-bottom:8px}
 .bulletin-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
-.bulletin-navigation{display:flex;align-items:center;gap:10px}
+.bulletin-navigation{display:flex;align-items:center;gap:8px}
 .bulletin-navigation[hidden]{display:none}
 .bulletin-navigation button{display:grid;place-items:center;width:44px;height:44px;padding:0;border:1px solid #ded4d8;border-radius:8px;background:#fff;color:#790a29;font-size:1.65rem;line-height:1}
 .bulletin-navigation button:hover{background:#f5ecef}
-.bulletin-count{min-width:5ch;text-align:center;font-size:.86rem;color:#635b5f}
-@media(max-width:420px){
-  .bulletin-story{align-items:flex-start;gap:10px}
-}
+@media(max-width:760px){.bulletin-track{grid-auto-columns:43%}}
+@media(max-width:480px){.bulletin-track{grid-auto-columns:80%;gap:12px}}

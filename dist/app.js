@@ -785,8 +785,10 @@ function home(){
     </section>
     ${actionPanel()}
     <section class="home-section home-municipal" aria-labelledby="home-municipal-title">
-      <div class="home-section-head"><div><p class="kicker">Panorama municipal</p><h2 id="home-municipal-title">Situación en ${escapeHTML(ruralScope())}</h2></div></div>
-      ${ruralFilters()}
+      <div class="home-section-head home-territory-head">
+        <div><p class="kicker">Panorama municipal</p><h2 id="home-municipal-title">Situación en ${escapeHTML(ruralScope())}</h2></div>
+        ${ruralFilters()}
+      </div>
       ${ruralOverview?`<p>Consulta la información disponible para esta zona.</p><div class="rural-home-links">
         <a class="link" href="#mapa">Ver mapa y pronóstico</a><a class="link" href="#avisos">Ver comunicados</a><a class="link" href="#refugios">Buscar refugios</a>
       </div>`:`<div class="home-municipal-grid">
@@ -800,11 +802,13 @@ function home(){
         </article>
       </div>`}
     </section>
-    <section class="home-section" aria-labelledby="monitoring-title">
-      <div class="home-section-head"><h2 id="monitoring-title">Monitoreo</h2></div>
-      <div class="home-monitoring">${monitoring.map(([route,image,title])=>`<a href="#planes/${route}"><img src="assets/${image}" alt="" loading="lazy"><strong>${title}</strong></a>`).join('')}</div>
-    </section>
-    ${bulletinPanel()}
+    <div class="home-updates">
+      ${bulletinPanel()}
+      <section class="card home-monitoring-panel" aria-labelledby="monitoring-title">
+        <div class="home-section-head"><h2 id="monitoring-title">Monitoreo</h2></div>
+        <div class="home-monitoring">${monitoring.map(([route,image,title])=>`<a href="#planes/${route}"><img src="assets/${image}" alt="" loading="lazy"><strong>${title}</strong></a>`).join('')}</div>
+      </section>
+    </div>
   </div>`;
 }
 function shelterCapacity(id){
@@ -1059,18 +1063,16 @@ function municipalNotices(){
     </section>`;
 }
 const bulletinPortal='https://www.puebla.gob.mx/index.php/noticias';
-let bulletinIndex=0;
 
 function bulletinPanel(){
   return `<section class="card bulletin-carousel" id="bulletins" aria-labelledby="bulletins-title">
     <small>Gobierno del Estado de Puebla</small>
     <h2 id="bulletins-title">Boletines estatales de protección civil</h2>
-    <div id="bulletinList"></div>
+    <ul id="bulletinList" class="bulletin-track" aria-label="Noticias de protección civil" tabindex="0"></ul>
     <div class="bulletin-footer">
       <a class="link" href="${bulletinPortal}" target="_blank" rel="noopener noreferrer">Ver todas las noticias</a>
       <div class="bulletin-navigation" role="group" aria-label="Navegación de boletines" hidden>
         <button type="button" data-bulletin-step="-1" aria-label="Noticia anterior">‹</button>
-        <span class="bulletin-count" aria-live="polite"></span>
         <button type="button" data-bulletin-step="1" aria-label="Noticia siguiente">›</button>
       </div>
     </div>
@@ -1082,8 +1084,8 @@ function paintBulletins(){
   if(!carousel)return;
   const format=new Intl.DateTimeFormat('es-MX',{dateStyle:'long',timeZone:'UTC'});
   const items=new Map();
-  const archive=municipalNews.map(({slug,title,date,summary})=>({
-    url:bulletinPortal+'/item/'+slug,title,summary,
+  const archive=municipalNews.map(({slug,title,date,topic})=>({
+    url:bulletinPortal+'/item/'+slug,title,topic,
     published:format.format(new Date(date+'T00:00:00Z')),
     image:'assets/aviso-'+slug.split('-',1)[0]+'.jpg',
   }));
@@ -1095,24 +1097,33 @@ function paintBulletins(){
     items.set(key,previous?{...item,...previous}:item);
   }
   const stories=[...items.values()];
-  bulletinIndex=(bulletinIndex+stories.length)%stories.length;
-  const story=stories[bulletinIndex];
-  carousel.querySelector('#bulletinList').innerHTML=`<article class="bulletin-story">
-    ${story.image?`<img src="${story.image}" alt="" loading="lazy" decoding="async">`:''}
-    <div><p class="muted">${escapeHTML(story.published)}</p>
-      <h3><a href="${escapeHTML(story.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(story.title)}</a></h3>
-      ${story.summary?`<p>${escapeHTML(story.summary)}</p>`:''}
-    </div>
-  </article>`;
+  const track=carousel.querySelector('#bulletinList');
+  const offset=track.scrollLeft;
+  track.innerHTML=stories.map(story=>`<li class="bulletin-story">
+    <a class="bulletin-story-link" href="${escapeHTML(story.url)}" target="_blank" rel="noopener noreferrer">
+      ${story.image?`<img class="bulletin-photo" src="${story.image}" alt="" loading="lazy" decoding="async">`:
+        `<span class="bulletin-photo bulletin-photo-placeholder" aria-hidden="true"><img src="assets/sicep-symbol.png" alt=""></span>`}
+      <span class="bulletin-topic">${escapeHTML(story.topic||'Protección Civil')}</span>
+      <h3>${escapeHTML(story.title)}</h3>
+      <span class="bulletin-date">${escapeHTML(story.published)}</span>
+    </a>
+  </li>`).join('');
+  track.scrollLeft=offset;
   carousel.querySelector('.bulletin-navigation').hidden=stories.length<2;
-  carousel.querySelector('.bulletin-count').textContent=`${bulletinIndex+1} de ${stories.length}`;
 }
 
 app.addEventListener('click',event=>{
   const button=event.target.closest('button[data-bulletin-step]');
   if(!button)return;
-  bulletinIndex+=Number(button.dataset.bulletinStep);
-  paintBulletins();
+  const track=button.closest('.bulletin-carousel').querySelector('.bulletin-track');
+  const [first,second]=track.children;
+  if(!second)return;
+  const step=Number(button.dataset.bulletinStep);
+  const end=track.scrollWidth-track.clientWidth;
+  let left=track.scrollLeft+step*(second.offsetLeft-first.offsetLeft);
+  if(step>0&&track.scrollLeft>=end-1)left=0;
+  if(step<0&&track.scrollLeft<=1)left=end;
+  track.scrollTo({left,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
 });
 
 function applySectionVisual(content,page,section){
