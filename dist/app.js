@@ -88,12 +88,33 @@ function riskMap(){
   const [west,south,east,north]=boxes[town].split(',').map(Number);
   const bounds=encodeURIComponent(boxes[town]);
   const marker=encodeURIComponent(`${(south+north)/2},${(west+east)/2}`);
-  return `${back()}<h1>Mapa municipal</h1>${select()}<section class="card map-card"><iframe title="Mapa de ${towns[town]} en OpenStreetMap" src="https://www.openstreetmap.org/export/embed.html?bbox=${bounds}&amp;layer=mapnik&amp;marker=${marker}"></iframe><p class="muted">Marcador de referencia del área mostrada. Los refugios y avisos de demostración se consultan por municipio.</p></section><div class="tiles">${tile('avisos','Ver avisos de '+towns[town],alerts[town][0])}${tile('refugios','Ver refugios de '+towns[town],'Abrir el directorio municipal')}</div>`;
+  return `${back()}<h1>Mapa municipal</h1>${select()}<section class="card map-card"><iframe title="Mapa de ${towns[town]} en OpenStreetMap" src="https://www.openstreetmap.org/export/embed.html?bbox=${bounds}&amp;layer=mapnik&amp;marker=${marker}"></iframe><p class="muted">Marcador de referencia del área mostrada. Los refugios y avisos de demostración se consultan por municipio.</p></section>`;
 }
 
-function actionPanel(){
-  return `<section class="action-panel"><div class="action-heading"><h2>Acciones rápidas</h2><a class="btn" href="tel:911">${icon('contactos')} Llamar al 911</a></div>
-  <div class="tiles">${tile('avisos','Consultar avisos','Boletines oficiales y escenario municipal')}${tile('refugios','Encontrar un refugio','Ubicación y disponibilidad de demostración')}${tile('mapa','Explorar mapa municipal','Consulta territorial')}${tile('planes','Planes de Protección Civil','Catálogo por tipo de emergencia')}${tile('contactos','Números de atención','Emergencias y denuncia anónima')}${tile('guia','Preparar a mi familia','Lista de tareas y avance personal')}</div></section>`;
+const actionCards = {
+  avisos: ['Consultar avisos', 'Boletines oficiales y avisos municipales'],
+  refugios: ['Buscar refugios', 'Direcciones y disponibilidad del ejercicio'],
+  mapa: ['Explorar mapa municipal', 'Ubica el municipio seleccionado'],
+  planes: ['Planes de Protección Civil', 'Consulta por tipo de emergencia'],
+  contactos: ['Números de atención', 'Emergencias y denuncia anónima'],
+  guia: ['Preparar a mi familia', 'Completa tu lista de preparación'],
+  coord: ['Coordinación municipal', 'Consulta el expediente y las tareas de brigada']
+};
+const actionsByPage = {
+  inicio: ['avisos','refugios','mapa','planes','contactos','guia'],
+  avisos: ['mapa','refugios','planes'],
+  refugios: ['mapa','avisos','contactos'],
+  detalle: ['refugios','mapa','contactos'],
+  guia: ['planes','refugios','contactos'],
+  contactos: ['avisos','refugios','guia'],
+  mapa: ['avisos','refugios','contactos'],
+  planes: ['guia','avisos','refugios'],
+  coord: ['refugios','mapa','avisos']
+};
+function actionPanel(page='inicio'){
+  const actions=actionsByPage[page].map(key=>tile(key,...actionCards[key])).join('');
+  const call=page==='contactos'?'':`<a class="btn" href="tel:911">${icon('contactos')} Llamar al 911</a>`;
+  return `<section class="action-panel" aria-labelledby="quick-actions"><div class="action-heading"><h2 id="quick-actions">Acciones rápidas</h2>${call}</div><div class="tiles">${actions}</div></section>`;
 }
 
 function home(){
@@ -137,7 +158,8 @@ function paintBulletins(){
 function render(){let [page,id]=(location.hash.slice(1)||'inicio').split('/');document.querySelector('#nav').innerHTML=Object.entries(labels).map(([k,v])=>'<a class="'+(k===(page==='detalle'?'refugios':page)?'on':'')+'" href="#'+k+'">'+icon(k)+v+'</a>').join('');let content;
 switch(page){case 'refugios':content=shelters();break;case 'detalle':content=detail(Number(id));break;case 'coord':town=1;content=coordination();break;case 'avisos':content=back()+'<h1>Avisos municipales</h1>'+select()+'<section class="card notice"><small>'+alerts[town][2]+'</small><h2>'+alerts[town][0]+'</h2><p>'+alerts[town][1]+'</p><p>Consulta la información oficial vigente en el portal estatal.</p>'+source+'</section><a class="link" href="#refugios">Ver refugios de '+towns[town]+'</a>';break;case 'contactos':content=contacts();break;case 'mapa':content=riskMap();break;case 'planes':content=plans(id);break;case 'guia':content=preparation();break;default:page='inicio';content=home()}
 if(page==='inicio')content+=bulletinPanel();
-if(page==='avisos')content+=bulletinPanel()+tile('mapa','Consultar mapa municipal',towns[town]);
+if(page==='avisos')content+=bulletinPanel();
+if(page!=='inicio')content+=actionPanel(page);
 app.innerHTML=page==='inicio'?content:'<div class="sheet">'+content+'</div>';paintBulletins();document.title=(labels[page]||'Protección civil')+' · SICEP Puebla'}
 app.addEventListener('change',e=>{if(e.target.id==='town'){town=Number(e.target.value);zoom=1;render()}});
 app.addEventListener('change',e=>{
