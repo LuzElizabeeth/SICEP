@@ -99,3 +99,9 @@
 .shelter-map-card select{min-width:0}
 .shelter-map-card iframe{display:block;width:100%;height:clamp(280px,49vw,420px);border:0;border-radius:10px;background:#eeebe8}
 .shelter-map-card p{margin-top:10px}
+.route-feedback{margin-top:14px;padding:12px 15px;border-left:4px solid #168456;border-radius:8px;background:#e9f5ee;color:#14583b;font-weight:700}
+.route-hazard-icon{background:transparent;border:0}
+.route-hazard-icon span{display:grid;place-items:center;width:32px;height:32px;border:3px solid #fff;border-radius:50%;box-shadow:0 2px 8px #0005;color:#fff;font:bold 18px/1 Arial}
+.route-hazard-icon.blocked span{background:#d9363e}
+.route-hazard-icon.partial span{background:#e9a528;color:#332400}
+.route-hazard-icon.passable span{background:#159969}
