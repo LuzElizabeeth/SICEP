@@ -1,5 +1,5 @@
 import {readFileSync,writeFileSync,mkdirSync,readdirSync} from 'node:fs';
-const files=['index.html','app.js','style.css','assets/cholula.png','assets/localidades-rurales-puebla.json','assets/sicep-symbol.png','assets/cholula-map.png','assets/LLUVIAS.jpeg','assets/POPOCATEPETL.jpg','assets/SISMO.jpeg','assets/contacto-089.png','assets/contacto-angeles-verdes.png','assets/contacto-capufe.png','assets/contacto-guardia-nacional.png','assets/contacto-puebla.png','assets/contacto-suma.jpg'];
+const files=['index.html','app.js','style.css','offline.js','assets/cholula.png','assets/localidades-rurales-puebla.json','assets/sicep-symbol.png','assets/cholula-map.png','assets/LLUVIAS.jpeg','assets/POPOCATEPETL.jpg','assets/SISMO.jpeg','assets/contacto-089.png','assets/contacto-angeles-verdes.png','assets/contacto-capufe.png','assets/contacto-guardia-nacional.png','assets/contacto-puebla.png','assets/contacto-suma.jpg'];
 files.push(...readdirSync('dist/assets').filter(file=>/^aviso-\d+\.jpg$/.test(file)).sort().map(file=>'assets/'+file));
 const assets=Object.fromEntries(files.map(file=>['/'+file,readFileSync('dist/'+file).toString('base64')]));
 mkdirSync('dist/server',{recursive:true});
@@ -7,7 +7,7 @@ writeFileSync('dist/server/index.js',readFileSync('worker/api.js','utf8')+'\n'+r
 export default {async fetch(request, env){
   const path=new URL(request.url).pathname;
   if(path==='/api/boletines')return bulletins(request);
-  if(path==='/api/situation')return state(request,env.DB);
+  if(path==='/api/situation')return state(request,env.DB,env.SICEP_OPERATORS);
   if(path==='/api/routes')return routeReports(request,env.DB);
   if(path.startsWith('/api/routes/photo/'))return routePhoto(request,env.DB,path.split('/').pop());
   const key=path==='/'?'/index.html':path;
