@@ -149,7 +149,7 @@ async function sync(){
     if(changed)render();
   }catch{try{incident=JSON.parse(localStorage.getItem('sicep.demo.v1')||'null')}catch{incident=null}if(connection!=='Registro municipal sin conexión · copia local'){connection='Registro municipal sin conexión · copia local';render()}}
 }
-function saveLocalExercise(stage,count,details,assignment,radio){
+function saveLocalExercise(stage,count,details,assignment,radio,attention){
   const now=new Date().toISOString(),old=incident||{},nextDetails={...(old.details||{}),...(details||{})};
   if(stage===2)Object.assign(nextDetails,{shelter:assignment?.shelter||'Auditorio Municipal',brigade:assignment?.brigade||'Brigada Atempan 01',taskStatus:'Asignada'});
   if(stage===3)nextDetails.taskStatus='Recibida por la brigada';
@@ -158,25 +158,27 @@ function saveLocalExercise(stage,count,details,assignment,radio){
     const messages=nextDetails.radioMessages||[];
     if(radio.text){
       if(messages.length>=30)throw Error('La bitácora del ejercicio está llena.');
-      nextDetails.radioMessages=[...messages,{id:radio.id,text:radio.text,sentAt:now}];
+      nextDetails.radioMessages=[...messages,{id:radio.id,text:radio.text,type:radio.type||'report',sentAt:now}];
     }else{
       nextDetails.radioMessages=messages.map(message=>message.id===radio.id&&!message.receivedAt?
         {...message,receivedAt:now}:message);
     }
   }
+  const actor=stage===3&&(!attention||attention.fromBrigade)?(nextDetails.brigade||'Brigada Atempan 01'):'Coordinación municipal';
+  if(attention)nextDetails.attention={status:attention.status,note:attention.note,updated:now,actor};
   const titles=['Ejercicio reiniciado','Incidente registrado o actualizado','Asignación confirmada','Brigada acusó recibo'];
-  const history=radio?(old.history||[]):stage===0?[]:[...(old.history||[]),{stage,title:titles[stage],created:now,actor:stage===3?(nextDetails.brigade||'Brigada Atempan 01'):'Coordinación municipal',summary:stage===1?`${count} personas · ${nextDetails.locality||'Atempan'}${nextDetails.supportRequested?' · apoyo regional solicitado':''}`:stage===2?`${nextDetails.shelter} · ${nextDetails.brigade}`:`Tarea recibida por ${nextDetails.brigade}`}];
+  const history=radio?(old.history||[]):stage===0?[]:[...(old.history||[]),{stage,title:attention?'Seguimiento actualizado':titles[stage],created:now,actor,summary:attention?`${attention.status} · ${attention.note}`:stage===1?`${count} personas · ${nextDetails.locality||'Atempan'}${nextDetails.supportRequested?' · apoyo regional solicitado':''}`:stage===2?`${nextDetails.shelter} · ${nextDetails.brigade}`:`Tarea recibida por ${nextDetails.brigade}`}];
   incident={...old,stage,count:stage===1?count:(old.count||count),details:stage===0?{}:nextDetails,history,updated:now};
   try{localStorage.setItem('sicep.demo.v1',JSON.stringify(incident))}catch{throw Error('No se pudo guardar el expediente en este navegador.')}
   connection='Registro local · datos guardados en este navegador';render();
 }
-async function update(stage,count,details=null,assignment=null,radio=null){
-  if(!hosted){saveLocalExercise(stage,count,details,assignment,radio);return}
+async function update(stage,count,details=null,assignment=null,radio=null,attention=null){
+  if(!hosted){saveLocalExercise(stage,count,details,assignment,radio,attention);return}
   try{
-    const r=await fetch('/api/situation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stage,count,revision,details,assignment,radio})});
+    const r=await fetch('/api/situation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stage,count,revision,details,assignment,radio,attention})});
     if(!r.ok){if(r.status===409){await sync();alert('El expediente cambió o esta acción ya fue registrada. Revisa el estado y vuelve a intentarlo.');return}if(r.status===404||(r.status===501&&['localhost','127.0.0.1'].includes(location.hostname)))throw Error('local');throw Error()}
     incident=await r.json();revision=incident.updated;render();
-  }catch(error){if(error instanceof TypeError||error.message==='local'){try{saveLocalExercise(stage,count,details,assignment,radio)}catch(localError){alert(localError.message)}return}alert('El cambio no se guardó. Revisa el estado del registro y vuelve a intentar.')}
+  }catch(error){if(error instanceof TypeError||error.message==='local'){try{saveLocalExercise(stage,count,details,assignment,radio,attention)}catch(localError){alert(localError.message)}return}alert('El cambio no se guardó. Revisa el estado del registro y vuelve a intentar.')}
 }
 const app=document.querySelector('#app');
 const tile=(k,title,sub)=>'<a class="tile" href="#'+k+'"><span class="icon">'+icon(k)+'</span><div><b>'+title+'</b><span class="muted">'+sub+'</span></div><span class="chev">›</span></a>';
@@ -199,6 +201,133 @@ try {
   const saved = JSON.parse(localStorage.getItem('sicep.prepared') || '[]');
   if (Array.isArray(saved)) prepared = saved.filter(i => Number.isInteger(i) && i >= 0 && i < checklist.length);
 } catch {}
+const planAccountKey='sicep.plan.account.v1';
+let planSession=null;
+let pendingPlanEdit=null;
+
+function curpAge(value){
+  const match=/^[A-ZÑ]{4}(\d{2})(\d{2})(\d{2})[HM][A-Z]{2}[A-ZÑ]{3}([A-Z0-9])\d$/.exec(value);
+  if(!match)return null;
+  const [,yy,mm,dd,century]=match;
+  const year=(/\d/.test(century)?1900:2000)+Number(yy),month=Number(mm),day=Number(dd);
+  const birth=new Date(Date.UTC(year,month-1,day));
+  if(birth.getUTCMonth()!==month-1||birth.getUTCDate()!==day)return null;
+  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Mexico_City',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+  const date=Object.fromEntries(today.map(part=>[part.type,Number(part.value)]));
+  const age=date.year-year-Number(date.month*100+date.day<month*100+day);
+  return age>=0?age:null;
+}
+
+function requestPlanEdit(resume){
+  pendingPlanEdit=resume;
+  const dialog=document.createElement('dialog');
+  dialog.className='household-dialog';
+  dialog.setAttribute('aria-labelledby','plan-access-title');
+  const existing=Boolean(localStorage.getItem(planAccountKey));
+  dialog.innerHTML=`
+    <h2 id="plan-access-title">Acceso a Mi plan</h2>
+    <div class="segment" role="group" aria-label="Tipo de acceso">
+      <button type="button" data-plan-mode="login">Iniciar sesión</button>
+      <button type="button" data-plan-mode="register">Registrarse</button>
+    </div>
+    <div data-plan-access-content></div>`;
+  const content=dialog.querySelector('[data-plan-access-content]');
+  const modes=[...dialog.querySelectorAll('[data-plan-mode]')];
+  function showMode(mode){
+    const login=mode==='login';
+    const hasAccount=Boolean(localStorage.getItem(planAccountKey));
+    modes.forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.planMode===mode)));
+    if(login!==hasAccount){
+      content.innerHTML=`<p role="status">${login?'Primero crea una cuenta con la opción Registrarse.':'Ya hay una cuenta para Mi plan en este navegador. Usa Iniciar sesión para acceder a tu plan.'}</p>
+        <button type="button" class="household-cancel" data-plan-cancel>Cancelar</button>`;
+      return;
+    }
+    content.innerHTML=`<form>
+    <p class="household-privacy">Cuenta local de este navegador. La CURP y el correo se guardan cifrados en este dispositivo.</p>
+    ${login?'':'<label>Nombre completo<input name="name" autocomplete="name" maxlength="120" required></label>'}
+    <label>CURP<input name="curp" minlength="18" maxlength="18" autocapitalize="characters" spellcheck="false" required></label>
+    <label>Correo electrónico<input name="email" type="email" autocomplete="email" maxlength="254" required></label>
+    <label>Edad<input name="age" readonly></label>
+    <label>Contraseña${login?'':' (mínimo 8 caracteres)'}<input name="password" type="password" autocomplete="${login?'current-password':'new-password'}" minlength="8" required></label>
+    <p data-plan-access-error role="alert"></p>
+    <div class="household-dialog-actions"><button class="household-cancel" type="button" data-plan-cancel>Cancelar</button><button class="household-save" type="submit">${login?'Iniciar sesión':resume?'Registrarse y continuar':'Registrarse'}</button></div>
+  </form>`;
+    const form=dialog.querySelector('form'),curpInput=form.elements.curp,submit=form.querySelector('[type=submit]');
+    const readCurp=()=>curpInput.value.trim().toUpperCase();
+    curpInput.addEventListener('input',()=>{form.elements.age.value=curpAge(readCurp())??''});
+    form.addEventListener('submit',async event=>{
+      event.preventDefault();
+      const data=new FormData(form),curp=readCurp(),age=curpAge(curp);
+      const email=String(data.get('email')).trim().toLowerCase(),password=String(data.get('password'));
+      const error=form.querySelector('[data-plan-access-error]');
+      if(age===null){error.textContent='Revisa la estructura y la fecha de nacimiento de la CURP.';return}
+      submit.disabled=true;
+      modes.forEach(button=>{button.disabled=true});
+      error.textContent='';
+      try{
+        const saved=localStorage.getItem(planAccountKey);
+        let account;
+        if(Boolean(saved)!==login){showMode(mode);return}
+        if(login){
+          account=(await decryptVault(JSON.parse(saved),password)).data;
+          if(account.curp!==curp||account.email!==email)throw new Error();
+        }else{
+          const name=String(data.get('name')||'').trim();
+          if(!name){error.textContent='Escribe tu nombre completo.';return}
+          account={curp,email,name};
+          const salt=crypto.getRandomValues(new Uint8Array(16));
+          const key=await deriveVaultKey(password,salt);
+          const encrypted=await encryptVault(account,key,salt);
+          if(!dialog.open)return;
+          if(localStorage.getItem(planAccountKey))throw new Error();
+          localStorage.setItem(planAccountKey,JSON.stringify(encrypted));
+        }
+        if(!dialog.open)return;
+        planSession={name:account.name,age};
+        const action=pendingPlanEdit;
+        pendingPlanEdit=null;
+        dialog.close();
+        updatePlanAccess();
+        action?.();
+      }catch{
+        error.textContent=login?'Revisa la CURP, el correo y la contraseña.':'No se pudo crear el acceso en este navegador.';
+      }finally{
+        submit.disabled=false;
+        modes.forEach(button=>{button.disabled=false});
+      }
+    });
+  }
+  modes.forEach(button=>button.addEventListener('click',()=>showMode(button.dataset.planMode)));
+  dialog.addEventListener('click',event=>{
+    if(event.target.closest('[data-plan-cancel]'))dialog.close();
+  });
+  dialog.addEventListener('close',()=>{pendingPlanEdit=null;dialog.remove()},{once:true});
+  showMode(existing?'login':'register');
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
+function renderPlanHeader(){
+  const title=app.querySelector('h1');
+  if(!title)return;
+  const header=document.createElement('div');
+  header.className='plan-page-heading';
+  const access=document.createElement('div');
+  access.id='plan-edit-access';
+  title.before(header);
+  header.append(title,access);
+  updatePlanAccess();
+}
+
+function updatePlanAccess(){
+  const bar=app.querySelector('#plan-edit-access');
+  if(bar)bar.innerHTML=planSession?`<span>${escapeHTML(planSession.name)} · ${planSession.age} años</span> <button type="button" class="route-refresh" data-plan-signout>Cerrar sesión de edición</button>`:
+    `<button type="button" class="btn" data-plan-access>Registrarse o iniciar sesión</button>`;
+  for(const field of app.querySelectorAll('#family-plan-form input, #family-plan-form textarea, #vault-note')){
+    field.readOnly=!planSession;
+  }
+}
+
 const homeStore='sicep.household.v1';
 let household={people:[],pets:[]};
 try{const saved=JSON.parse(localStorage.getItem(homeStore)||'{}');household={people:Array.isArray(saved.people)?saved.people:[],pets:Array.isArray(saved.pets)?saved.pets:[]}}catch{}
@@ -364,7 +493,6 @@ const contactGroups=[
     ['Protección Civil Estatal','Orientación y contacto institucional.',['222 246 27 50'],'civil'],
     ['Denuncia anónima','Información para denunciar delitos de forma anónima.',['089'],'security'],
     ['SUMA Puebla','Contacto del Servicio de Urgencias Médicas Avanzadas.',['222 232 8080','222 232 8081','222 232 8082'],'health'],
-    ['Centro de Atención Telefónica','Línea de contacto publicada por Servicios de Salud de Puebla.',['800 581 44 44'],'health'],
   ]],
   ['Asistencia en carretera',[
     ['CAPUFE','Auxilio en autopistas operadas por CAPUFE.',['074'],'roads'],
@@ -380,7 +508,14 @@ function contacts(){
       <a class="btn" href="tel:911">${icon('contactos')} Llamar al 911</a>
     </section>
     ${contactGroups.map(([title,contacts],index)=>`<section class="contact-additional" aria-labelledby="contact-group-${index}">
-      <h2 id="contact-group-${index}">${title}</h2><div class="contact-additional-grid">
+      <div class="contact-group-heading">
+        <h2 id="contact-group-${index}">${title}</h2>
+        <div class="contact-navigation" role="group" aria-label="Recorrer ${title}">
+          <button type="button" data-contact-scroll="-1" aria-label="Contacto anterior" aria-controls="contact-track-${index}">‹</button>
+          <button type="button" data-contact-scroll="1" aria-label="Siguiente contacto" aria-controls="contact-track-${index}">›</button>
+        </div>
+      </div>
+      <div class="contact-track" id="contact-track-${index}" role="region" aria-labelledby="contact-group-${index}" tabindex="0">
       ${contacts.map(([name,description,numbers,source])=>`<article class="contact-extra contact-directory-card">
         <div class="contact-directory-title"><div class="contact-directory-brand">${contactIdentity(name,source)}</div><h3>${name}</h3></div>
         <p class="contact-directory-description">${description}</p>
@@ -874,7 +1009,7 @@ function shelters(){
     <div class="shelter-intro"><span class="kicker">Refugios disponibles</span>
     <h1>Refugios temporales</h1>
     <p>Encuentra refugios por municipio o comunidad y ubícalos en el mapa.</p></div>
-    <p class="shelter-source">Los registros rurales provienen del plan estatal. Consulta con Protección Civil si están habilitados antes de trasladarte. <a class="link" href="${shelterPlan}" target="_blank" rel="noopener">Ver plan estatal</a></p>
+    <p class="shelter-source">Los registros rurales provienen del plan estatal. Consulta con Protección Civil si están habilitados antes de trasladarte.${profile==='coordinacion'?'':` <a class="link" href="${shelterPlan}" target="_blank" rel="noopener">Ver plan estatal</a>`}</p>
     <div class="card shelter-filters" aria-label="Filtros del directorio" role="group">
       ${ruralFilters()}
       <label>Buscar refugio<input id="shelter-query" type="search" placeholder="Nombre, localidad o dirección" value="${escapeHTML(shelterQuery)}"></label>
@@ -918,37 +1053,51 @@ function refreshShelterResults(){
 const source='<a class="link" target="_blank" rel="noopener" href="https://proteccioncivil.puebla.gob.mx/">Protección Civil del Estado de Puebla</a>';
 function caseDetails(){return{locality:'Atempan',reportedAt:incident?.updated||new Date().toISOString(),source:'Protección Civil municipal',impact:'Inundación; familias requieren alojamiento temporal.',need:'Alojamiento temporal',verification:incident?.stage?'Verificado en el ejercicio':'Pendiente de verificar',...(incident?.details||{})}}
 function caseForm(details,count){const localDate=new Date(new Date(details.reportedAt).getTime()-new Date(details.reportedAt).getTimezoneOffset()*60000).toISOString().slice(0,16);return `<form id="report" class="case-form"><h2>${incident?.stage?'Actualizar datos del incidente':'Registrar incidente'}</h2><div class="case-form-grid"><label>Localidad<input name="locality" value="${escapeHTML(details.locality)}" maxlength="100" required></label><label>Fecha y hora del reporte<input type="datetime-local" name="reportedAt" value="${localDate}" required></label><label>Origen del reporte<select name="source">${['Protección Civil municipal','Llamada al 911','Radio','Reporte ciudadano'].map(x=>`<option ${details.source===x?'selected':''}>${x}</option>`).join('')}</select></label><label>Necesidad principal<select name="need">${['Alojamiento temporal','Evacuación','Atención médica','Alimentos y agua','Otro'].map(x=>`<option ${details.need===x?'selected':''}>${x}</option>`).join('')}</select></label><label class="case-form-wide">Afectación reportada<textarea name="impact" rows="3" maxlength="300" required>${escapeHTML(details.impact)}</textarea></label><label>Personas estimadas<input type="number" name="count" min="1" max="9999" value="${count}" required></label><label>Verificación<select name="verification"><option ${details.verification==='Pendiente de verificar'?'selected':''}>Pendiente de verificar</option><option ${details.verification==='Verificado en el ejercicio'?'selected':''}>Verificado en el ejercicio</option></select></label></div><div class="case-actions"><button type="submit">${incident?.stage?'Guardar cambios':'Registrar y abrir expediente'}</button>${incident?.stage?'<button type="button" class="route-refresh" data-case-cancel>Cancelar</button>':''}</div></form>`}
+const attentionStates=['Pendiente','En atención','Atendida'];
+function attentionPanel(details,stage,field=false){
+  const progress=details.attention;
+  return `<section class="card case-history">
+    <h2>${field?'Reportar avance':'Seguimiento de la atención'}</h2>
+    <p><strong>${escapeHTML(details.need)}</strong> · ${progress?.status||attentionStates[0]}</p>
+    ${progress?.note?`<p>${escapeHTML(progress.note)}</p><small>Actualizado · ${caseTime(progress.updated)} (Puebla)${progress.actor?' · '+escapeHTML(progress.actor):''}</small>`:''}
+    ${stage===3?`<form id="attention-form" class="case-form">
+      <label>Estado de la necesidad<select name="status">${attentionStates.map(status=>`<option ${status===progress?.status?'selected':''}>${status}</option>`).join('')}</select></label>
+      <label>Avance o pendiente<textarea name="note" rows="3" maxlength="300" required ${field?'placeholder="Describe el acceso, los impedimentos o el apoyo que hace falta"':''}>${field?'':escapeHTML(progress?.note||'')}</textarea></label>
+      <button>${field?'Registrar avance':'Guardar seguimiento'}</button>
+    </form>`:'<p>El seguimiento se habilita cuando la brigada acepta la tarea.</p>'}
+  </section>`;
+}
 function coordination(){
   const stage=incident?.stage||0,details=caseDetails(),history=incident?.history||[],reportedAt=Number.isFinite(Date.parse(details.reportedAt))?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(details.reportedAt)):'Sin hora registrada';
   const timeline=history.length?history.map(event=>`<li><b>${escapeHTML(event.title)}</b><small>${escapeHTML(event.actor)} · ${new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(event.created))}</small><span>${escapeHTML(event.summary)}</span></li>`).join(''):'<li><b>Historial del expediente</b><small>Sin movimientos adicionales registrados.</small><span>El historial se actualizará al registrar o cambiar el incidente.</span></li>';
-  const resources=stage?`<section class="card"><small>Recursos del municipio</small><h2>Refugios considerados</h2><div class="resource-grid"><article class="resource-option recommended"><b>Auditorio Municipal</b><span>500 personas de capacidad nominal · 40 cupos confirmados en el ejercicio</span><span>Acceso verificado · radio y transporte disponibles</span><strong>${incident.count<=40?`Recomendado para ${incident.count} personas: tiene cupo confirmado y acceso disponible.`:'No alcanza para las '+incident.count+' personas estimadas; solicita apoyo adicional.'}</strong></article><article class="resource-option unavailable"><b>Escuela 1º de enero</b><span>300 lugares nominales · cupo confirmado: 0</span><span>Acceso bloqueado en el ejercicio</span><strong>Descartado: no es posible llegar al inmueble.</strong></article></div><h2>Brigadas disponibles</h2><div class="resource-grid"><article class="resource-option"><b>Brigada Atempan 01</b><span>4 integrantes · radio y vehículo</span><span>Disponible</span></article><article class="resource-option"><b>Brigada Atempan 02</b><span>3 integrantes · primeros auxilios</span><span>Disponible</span></article></div></section>`:'';
+  const resources=stage?`<section class="card"><small>Recursos del municipio</small><h2>Refugios considerados</h2><div class="resource-grid"><article class="resource-option recommended"><b>Auditorio Municipal</b><span>500 personas de capacidad nominal · 40 cupos confirmados en el ejercicio</span><span>Abierto · acceso verificado · radio y transporte disponibles</span><span>Estado operativo simulado · sin hora de verificación registrada</span><strong>${incident.count<=40?`Recomendado para ${incident.count} personas: tiene cupo confirmado y acceso disponible.`:'No alcanza para las '+incident.count+' personas estimadas; solicita apoyo adicional.'}</strong></article><article class="resource-option unavailable"><b>Escuela 1º de enero</b><span>300 lugares nominales · cupo confirmado: 0</span><span>Apertura sin confirmar · acceso bloqueado en el ejercicio</span><span>Estado operativo simulado · sin hora de verificación registrada</span><strong>Descartado: no es posible llegar al inmueble.</strong></article></div><h2>Brigadas disponibles</h2><div class="resource-grid"><article class="resource-option"><b>Brigada Atempan 01</b><span>4 integrantes · radio y vehículo</span><span>Disponible</span></article><article class="resource-option"><b>Brigada Atempan 02</b><span>3 integrantes · primeros auxilios</span><span>Disponible</span></article></div></section>`:'';
   let action='';
-  if(stage===1)action=incident.count<=40?`<form id="assignment" class="case-task"><h2>Propuesta de atención</h2><p>El Auditorio Municipal cubre las ${incident.count} personas estimadas. La escuela se descarta porque su acceso está bloqueado.</p><label>Refugio<select name="shelter"><option>Auditorio Municipal</option></select></label><label>Brigada a cargo<select name="brigade"><option>Brigada Atempan 01</option><option>Brigada Atempan 02</option></select></label><button>Confirmar asignación</button></form>`:`<section class="case-task"><h2>Se requiere apoyo adicional</h2><p>Los 40 lugares confirmados del Auditorio Municipal no cubren a las ${incident.count} personas estimadas.</p>${details.supportRequested?'<p class="pill">Solicitud de apoyo regional registrada.</p>':'<button type="button" data-support-request>Solicitar apoyo regional</button>'}</section>`;
+  if(stage===1)action=incident.count<=40?`<form id="assignment" class="case-task"><h2>Propuesta de atención</h2><p>El Auditorio Municipal cubre las ${incident.count} personas estimadas. La escuela se descarta porque su acceso está bloqueado.</p><label>Refugio<select name="shelter"><option>Auditorio Municipal</option></select></label><p>${details.need==='Atención médica'?'Se recomienda la Brigada Atempan 02 por su formación en primeros auxilios.':'Se recomienda la Brigada Atempan 01 por su radio y vehículo para coordinar el traslado y la recepción.'} Ambas figuran disponibles en el ejercicio.</p><label>Brigada a cargo<select name="brigade"><option>Brigada Atempan 01</option><option ${details.need==='Atención médica'?'selected':''}>Brigada Atempan 02</option></select></label><button>Confirmar asignación</button></form>`:`<section class="case-task"><h2>Se requiere apoyo adicional</h2><p>Los 40 lugares confirmados del Auditorio Municipal no cubren a las ${incident.count} personas estimadas.</p>${details.supportRequested?'<p class="pill">Solicitud de apoyo regional registrada.</p>':'<button type="button" data-support-request>Solicitar apoyo regional</button>'}</section>`;
   if(stage===2)action=`<section class="case-task"><small>Tarea de brigada · Prioridad alta</small><h2>${escapeHTML(details.shelter||'Auditorio Municipal')}</h2><p>Responsable: ${escapeHTML(details.brigade||'Brigada Atempan 01')}</p><p>Instrucción: verificar acceso, recibir a las ${incident.count} personas y reportar cualquier impedimento.</p><p>Estado: <b>${escapeHTML(details.taskStatus||'Asignada')}</b></p><a class="btn" href="#brigada">Abrir vista de brigada</a></section>`;
   if(stage===3)action=`<section class="case-task"><small>Tarea de brigada · Recibida</small><h2>${escapeHTML(details.shelter||'Auditorio Municipal')}</h2><p>Responsable: ${escapeHTML(details.brigade||'Brigada Atempan 01')}</p><p>La brigada confirmó la recepción de la instrucción.</p><a class="link" href="#brigada">Ver tarea de brigada</a></section>`;
-  return `${back()}<small class="kicker">Atempan · Caso de práctica</small><h1>Expediente municipal</h1><p>${escapeHTML(connection)}</p><section class="card case-dossier"><div class="case-heading"><div><small>Expediente municipal · ${stageName[stage]}</small><h2>Folio SICEP-AT-001</h2></div><span class="pill">${escapeHTML(details.verification)}</span></div>${stage===0||coordEditing?caseForm(details,incident?.count||35):`<div class="case-facts"><div><small>Localidad</small><b>${escapeHTML(details.locality)}</b></div><div><small>Fecha y hora</small><b>${escapeHTML(reportedAt)}</b></div><div><small>Origen</small><b>${escapeHTML(details.source)}</b></div><div><small>Personas estimadas</small><b>${incident.count}</b></div><div><small>Necesidad principal</small><b>${escapeHTML(details.need)}</b></div><div class="case-fact-wide"><small>Afectación</small><b>${escapeHTML(details.impact)}</b></div></div><button type="button" class="route-refresh" data-case-edit>Editar incidente</button>`}</section>${resources}${action}${stage>=2?radioLog(details,stage):''}<section class="card case-history"><small>Movimientos del folio</small><h2>Historial del expediente</h2><ol>${timeline}</ol></section>${stage?'<button type="button" class="route-refresh" data-step="0">Reiniciar ejercicio</button>':''}`
+  return `${back()}<small class="kicker">Atempan · Caso de práctica</small><h1>Expediente municipal</h1><p>${escapeHTML(connection)}</p><section class="card case-dossier"><div class="case-heading"><div><small>Expediente municipal · ${stageName[stage]}</small><h2>Folio SICEP-AT-001</h2></div><span class="pill">${escapeHTML(details.verification)}</span></div>${stage===0||coordEditing?caseForm(details,incident?.count||35):`<div class="case-facts"><div><small>Localidad</small><b>${escapeHTML(details.locality)}</b></div><div><small>Fecha y hora</small><b>${escapeHTML(reportedAt)}</b></div><div><small>Origen</small><b>${escapeHTML(details.source)}</b></div><div><small>Personas estimadas</small><b>${incident.count}</b></div><div><small>Necesidad principal</small><b>${escapeHTML(details.need)}</b></div><div class="case-fact-wide"><small>Afectación</small><b>${escapeHTML(details.impact)}</b></div></div><button type="button" class="route-refresh" data-case-edit>Editar incidente</button>`}</section>${resources}${action}${stage?attentionPanel(details,stage):''}${stage>=2?radioLog(details,stage):''}<section class="card case-history"><small>Movimientos del folio</small><h2>Historial del expediente</h2><ol>${timeline}</ol></section>${stage?'<button type="button" class="route-refresh" data-step="0">Reiniciar ejercicio</button>':''}`
 }
 function caseTime(value){
   return new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short',timeZone:'America/Mexico_City'}).format(new Date(value));
 }
 
-function radioLog(details,stage){
+function radioLog(details,stage,field=false){
   const messages=details.radioMessages||[];
   const brigade=escapeHTML(details.brigade||'Brigada Atempan 01');
   return `<section class="card case-radio" aria-labelledby="case-radio-title">
     <h2 id="case-radio-title" class="section-icon-title"><span class="icon">${icon('radio')}</span>Bitácora de radio</h2>
     <p class="muted">Simulación verbal. Folio SICEP-AT-001.</p>
-    ${stage===3&&messages.length<30?`<form id="case-radio-form">
-      <p>De ${brigade} a Coordinación municipal</p>
-      <label>Mensaje recibido por radio<textarea name="message" rows="3" maxlength="320" required></textarea></label>
+    ${field?'<p>Comunica los impedimentos por radio institucional si pierdes la conexión. Coordinación registra el mensaje y su acuse en este folio.</p>':stage===3&&messages.length<30?`<form id="case-radio-form">
+      <label>Tipo de comunicación<select name="type"><option value="report">Reporte de brigada</option><option value="instruction">Instrucción de Coordinación</option></select></label>
+      <label>Mensaje comunicado por radio<textarea name="message" rows="3" maxlength="320" required></textarea></label>
       <button>Registrar mensaje</button>
     </form>`:stage===2?'<p>La captura se habilita cuando la brigada acepta la tarea.</p>':'<p>Se alcanzó el límite de mensajes del ejercicio.</p>'}
     ${messages.length?`<ul>${messages.map(message=>`<li>
-      <div class="case-radio-meta"><strong>${brigade} → Coordinación municipal</strong>
+      <div class="case-radio-meta"><strong>${message.type==='instruction'?`Coordinación municipal → ${brigade}`:`${brigade} → Coordinación municipal`}</strong>
       <span class="pill ${message.receivedAt?'':'neutral'}">${message.receivedAt?'Acuse registrado':'Pendiente de acuse'}</span></div>
       <p>${escapeHTML(message.text)}</p><small>Captura · ${caseTime(message.sentAt)} (Puebla)</small>
-      ${message.receivedAt?`<small>Acuse de Coordinación · ${caseTime(message.receivedAt)} (Puebla)</small>`:
-      `<button type="button" data-radio-ack="${escapeHTML(message.id)}">Registrar acuse de radio</button>`}
+      ${message.receivedAt?`<small>Acuse ${message.type==='instruction'?'de brigada':'de Coordinación'} · ${caseTime(message.receivedAt)} (Puebla)</small>`:
+      field?'':`<button type="button" data-radio-ack="${escapeHTML(message.id)}">Registrar acuse de radio</button>`}
     </li>`).join('')}</ul>`:'<p class="muted">Sin mensajes registrados.</p>'}
   </section>`;
 }
@@ -961,6 +1110,7 @@ function roleHome(){
   const pending=messages.filter(message=>!message.receivedAt).length;
   const links=field?[
     ['rutas','Consultar rutas','Revisa los trayectos y reportes de calles.'],
+    ['refugios','Directorio de refugios','Consulta el acceso, el cupo y la ubicación.'],
     ['contactos','Contactos de emergencia','Consulta los números de atención.'],
   ]:[
     ['refugios','Directorio de refugios','Consulta capacidad, acceso y ubicación.'],
@@ -987,11 +1137,11 @@ function roleHome(){
     <section class="card role-overview" aria-labelledby="role-overview-title">
       <div class="role-overview-heading"><div><p class="kicker">Caso de práctica</p>
         <h2 id="role-overview-title">${field?'Tu próxima tarea':'Expediente de Atempan'}</h2></div><span class="pill ${stage===3?'':'neutral'}">${status}</span></div>
-      ${field?(stage>=2?`<p>${escapeHTML(details.brigade||'Brigada Atempan 01')} · ${escapeHTML(details.shelter||'Auditorio Municipal')}</p><p class="muted">Folio SICEP-AT-001</p>`:
+      ${field?(stage>=2?`<p>${escapeHTML(details.brigade||'Brigada Atempan 01')} · ${escapeHTML(details.shelter||'Auditorio Municipal')}</p><p class="muted">Folio SICEP-AT-001</p><dl class="role-metrics"><div><dt>Estado de la atención</dt><dd>${escapeHTML(details.attention?.status||attentionStates[0])}</dd></div></dl>`:
         '<p>Las asignaciones confirmadas por Coordinación aparecerán aquí.</p>'):
         `<p class="muted">Folio SICEP-AT-001 · ${escapeHTML(connection)}</p>
         <dl class="role-metrics"><div><dt>Personas estimadas</dt><dd>${stage?incident.count:'—'}</dd></div>
-        <div><dt>Mensajes pendientes de acuse</dt><dd>${pending}</dd></div></dl>`}
+        <div><dt>Mensajes pendientes de acuse</dt><dd>${pending}</dd></div><div><dt>Estado de la necesidad</dt><dd>${stage?(details.attention?.status||attentionStates[0]):'—'}</dd></div></dl>`}
     </section>
   </div>`;
 }
@@ -1005,10 +1155,16 @@ function brigadeView(){
       <section class="card case-task"><p class="kicker">SICEP-AT-001 · Prioridad alta</p>
         <h2>${escapeHTML(details.shelter||'Auditorio Municipal')}</h2>
         <p><strong>Responsable</strong> ${escapeHTML(details.brigade||'Brigada Atempan 01')}</p>
-        <p>Verifica el acceso, prepara la recepción de ${incident.count} personas y comunica cualquier impedimento a Coordinación.</p>
+        <div class="case-facts">
+          <div><small>Localidad</small><b>${escapeHTML(details.locality)}</b></div>
+          <div><small>Personas estimadas</small><b>${incident.count}</b></div>
+          <div><small>Necesidad</small><b>${escapeHTML(details.need)}</b></div>
+          <div><small>Afectación</small><b>${escapeHTML(details.impact)}</b></div>
+        </div>
+        <p>Verifica el acceso al refugio, prepara la recepción de las personas y comunica cualquier impedimento a Coordinación.</p>
+        <div class="case-actions"><a class="link" href="#detalle/2">Consultar refugio asignado</a><a class="link" href="#rutas">Consultar rutas y reportes</a></div>
         ${stage===2?'<button type="button" data-step="3">Aceptar tarea</button>':'<p class="pill" role="status">Tarea aceptada · acuse registrado</p>'}
-      </section>`}
-    <a class="link" href="#coord">Cambiar a Coordinación y ver el expediente</a>`;
+      </section>${attentionPanel(details,stage,true)}${radioLog(details,stage,true)}`}`;
 }
 
 let bulletinData=null;
@@ -1155,7 +1311,7 @@ if(ruralFilterPages.has(page)&&routeTown>=0&&routeTown!==town)changeMunicipality
 let content;
 switch(page){case 'inicio-coord':case 'inicio-brigada':content=roleHome();break;case 'refugios':content=shelters();break;case 'detalle':content=detail(Number(id));break;case 'coord':town=1;content=coordination();break;case 'brigada':content=brigadeView();break;case 'avisos':content=municipalNotices();break;case 'contactos':content=contacts();break;case 'mapa':content=riskMap();break;case 'rutas':content=routesPage();break;case 'planes':content=plans(id);break;case 'guia':content=back('inicio','Volver a Inicio')+preparation(id);break;default:page='inicio';content=home()}
 if(page==='avisos')content+=bulletinPanel();
-app.innerHTML=['inicio','inicio-coord','inicio-brigada'].includes(page)?content:'<div class="sheet">'+applySectionVisual(content,page,id)+'</div>';paintBulletins();document.title=(page==='rutas'?'Rutas':profiles[profile].pages[selectedPage]||'Protección civil')+' · SICEP Puebla';if(ruralFilterPages.has(page))loadRuralCatalog();if(page==='mapa')initializeRiskMap();if(page==='rutas'&&ruralRouteTown()>=0&&!ruralLocality()){initializeRouteMap();if(roadMode==='cargando')refreshRoadReports()}}
+app.innerHTML=['inicio','inicio-coord','inicio-brigada'].includes(page)?content:'<div class="sheet">'+applySectionVisual(content,page,id)+'</div>';if(page==='guia'){renderPlanHeader()}paintBulletins();document.title=(page==='rutas'?'Rutas':profiles[profile].pages[selectedPage]||'Protección civil')+' · SICEP Puebla';if(ruralFilterPages.has(page))loadRuralCatalog();if(page==='mapa')initializeRiskMap();if(page==='rutas'&&ruralRouteTown()>=0&&!ruralLocality()){initializeRouteMap();if(roadMode==='cargando')refreshRoadReports()}}
 function changeMunicipality(value){
   town=value;
   zoom=1;
@@ -1164,6 +1320,51 @@ function changeMunicipality(value){
   routeReportPoint=null;
   routeResult=null;
 }
+const gatedPlanButtons='[data-add-person],[data-add-pet],[data-remove-person],[data-remove-pet],[data-vault-destroy]';
+const gatedPlanForms='#person-form,#pet-form,#family-plan-form,#vault-create-form,#vault-custom-form,#vault-note-form';
+app.addEventListener('click',event=>{
+  const button=event.target.closest('[data-contact-scroll]');
+  if(!button)return;
+  const track=document.getElementById(button.getAttribute('aria-controls'));
+  const cards=[...track.children];
+  const step=cards[1].offsetLeft-cards[0].offsetLeft;
+  const index=Math.round(track.scrollLeft/step)+Number(button.dataset.contactScroll);
+  track.scrollTo({left:Math.max(0,index)*step,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+});
+app.addEventListener('click',event=>{
+  const target=event.target;
+  if(target.closest('[data-plan-access]')){
+    requestPlanEdit();
+    return;
+  }
+  if(target.closest('[data-plan-signout]')){
+    planSession=null;
+    vaultOpen=false;
+    vaultKey=null;
+    vaultData=null;
+    render();
+    return;
+  }
+  if(planSession)return;
+  const button=target.closest(gatedPlanButtons);
+  const field=target.closest('#family-plan-form input,#family-plan-form textarea,#vault-note');
+  const checkbox=target.closest('[data-supply],[data-vault-item]');
+  if(!button&&!field&&!checkbox)return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  requestPlanEdit(()=>{if(field)field.focus();else (button||checkbox).click()});
+},true);
+app.addEventListener('beforeinput',event=>{
+  if(planSession||!event.target.closest('#family-plan-form input,#family-plan-form textarea,#vault-note'))return;
+  event.preventDefault();
+  requestPlanEdit(()=>event.target.focus());
+},true);
+app.addEventListener('submit',event=>{
+  if(planSession||!event.target.matches(gatedPlanForms))return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  requestPlanEdit(()=>event.target.requestSubmit());
+},true);
 app.addEventListener('input',event=>{
   if(event.target.id!=='shelter-query')return;
   shelterQuery=event.target.value;
@@ -1202,9 +1403,13 @@ app.addEventListener('change',e=>{
   try{localStorage.setItem('sicep.prepared',JSON.stringify(prepared))}
   catch{status.textContent+=' · El navegador no pudo guardar el avance.'}
 });
-app.addEventListener('submit',e=>{e.preventDefault();if(e.target.id==='case-radio-form'){
+app.addEventListener('submit',e=>{e.preventDefault();if(e.target.id==='attention-form'){
+  const data=new FormData(e.target),status=String(data.get('status')),note=String(data.get('note')).trim();
+  if(incident?.stage===3&&attentionStates.includes(status)&&note)update(3,incident.count,null,null,null,{status,note,fromBrigade:profile==='brigada'});
+  return;
+}if(e.target.id==='case-radio-form'){
   const text=String(new FormData(e.target).get('message')||'').trim();
-  if(text&&incident?.stage===3)update(3,incident.count,null,null,{id:crypto.randomUUID(),text});
+  if(text&&incident?.stage===3)update(3,incident.count,null,null,{id:crypto.randomUUID(),text,type:String(new FormData(e.target).get('type'))});
   return;
 }if(e.target.id==='person-form'||e.target.id==='pet-form'){const data=new FormData(e.target),item=Object.fromEntries(data.entries());if(e.target.id==='person-form')household.people.push(item);else household.pets.push(item);try{localStorage.setItem(homeStore,JSON.stringify(household))}catch{alert('No se pudo guardar en este dispositivo. Libera espacio e inténtalo de nuevo.');return}render();return}if(e.target.id==='route-report-form'){submitRoadReport(e.target);return}if(e.target.id==='assignment'){const data=new FormData(e.target);update(2,incident?.count||35,null,{shelter:String(data.get('shelter')),brigade:String(data.get('brigade'))});return}if(e.target.id==='report'){const data=new FormData(e.target),details={locality:String(data.get('locality')||''),reportedAt:new Date(String(data.get('reportedAt'))).toISOString(),source:String(data.get('source')||''),impact:String(data.get('impact')||''),need:String(data.get('need')||''),verification:String(data.get('verification')||'')};coordEditing=false;update(1,Number(data.get('count')),details);return}update(1,Number(new FormData(e.target).get('count')))});
 app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-retry-rural')){ruralCatalogStatus='idle';loadRuralCatalog();return}if(b.dataset.radioAck){if(incident?.stage===3)update(3,incident.count,null,null,{id:b.dataset.radioAck});return}if(b.hasAttribute('data-add-person')){document.querySelector('#person-dialog')?.showModal();return}if(b.hasAttribute('data-add-pet')){document.querySelector('#pet-dialog')?.showModal();return}if(b.hasAttribute('data-close-dialog')){b.closest('dialog')?.close();return}if(b.dataset.removePerson!==undefined||b.dataset.removePet!==undefined){const people=b.dataset.removePerson!==undefined,index=Number(people?b.dataset.removePerson:b.dataset.removePet),items=people?household.people:household.pets;if(Number.isInteger(index)&&confirm(`¿Quitar ${items[index]?.name||'este registro'} del hogar?`)){items.splice(index,1);localStorage.setItem(homeStore,JSON.stringify(household));render()}return}if(b.hasAttribute('data-case-edit')){coordEditing=true;render();return}if(b.hasAttribute('data-case-cancel')){coordEditing=false;render();return}if(b.hasAttribute('data-support-request')){const details={...caseDetails(),supportRequested:true};update(1,incident?.count||35,details);return}if(b.dataset.refreshRoutes!==undefined)refreshRoadReports();if(b.dataset.routeMode){routeMapMode=b.dataset.routeMode;if(routeMapMode==='origin')routeReportPoint=null;render();if(routeMapMode==='report')setTimeout(()=>document.querySelector('#route-real-map')?.scrollIntoView({behavior:'smooth',block:'center'}),100)}if(b.hasAttribute('data-route-location')){if(!navigator.geolocation){alert('Este navegador no permite compartir ubicación.');return}navigator.geolocation.getCurrentPosition(position=>{routeOrigin=[position.coords.latitude,position.coords.longitude];routeMapMode='origin';render()},()=>alert('No se pudo obtener la ubicación. Puedes marcar la salida tocando el mapa.'),{enableHighAccuracy:true,timeout:10000,maximumAge:60000})}if(b.hasAttribute('data-refresh-monitoring')){render();return}if(b.dataset.layer){hazardLayer=b.dataset.layer;riskMapInstance?.remove();riskMapInstance=null;riskMapView=null;render()}if(b.dataset.clearShelters!==undefined){shelterQuery='';shelterStatus='';ruralLocalityCode='';render();document.querySelector('#shelter-query').focus()}if(b.dataset.mode){mode=b.dataset.mode;render();document.querySelector('[data-mode="'+mode+'"]').focus()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});

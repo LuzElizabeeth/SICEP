@@ -165,13 +165,12 @@
 .home-updates{display:grid;grid-template-columns:minmax(0,2.25fr) minmax(0,1fr);gap:16px}
 .home-updates>section{min-width:0;margin:0}
 .home-monitoring-panel{display:flex;flex-direction:column}
-.home-monitoring{display:grid;grid-auto-rows:1fr;flex:1;gap:8px}
-.home-monitoring a{display:flex;align-items:center;overflow:hidden;border:1px solid var(--home-line);border-radius:10px;background:white;color:var(--home-ink);text-decoration:none}
-.home-monitoring img{display:block;width:86px;height:100%;min-height:62px;object-fit:cover;flex:none}
-.home-monitoring strong{padding:8px 12px}
+.home-monitoring{display:grid;gap:8px}
+.home-monitoring a{display:grid;grid-template-columns:clamp(3.75rem,22%,5.375rem) minmax(0,1fr);align-items:center;overflow:hidden;border:1px solid var(--home-line);border-radius:10px;background:white;color:var(--home-ink);text-decoration:none}
+.home-monitoring img{display:block;width:100%;height:auto;aspect-ratio:3/2;object-fit:contain;background:#f5eff1}
+.home-monitoring strong{padding:8px 12px;overflow-wrap:anywhere}
 @media(max-width:850px){
   .home-updates{grid-template-columns:minmax(0,1fr)}
-  .home-monitoring img{height:62px}
 }
 .home a:focus-visible{outline:2px solid var(--home-wine);outline-offset:3px}
 @media(max-width:680px){
@@ -440,3 +439,65 @@
 .bulletin-navigation button:hover{background:#f5ecef}
 @media(max-width:760px){.bulletin-track{grid-auto-columns:43%}}
 @media(max-width:480px){.bulletin-track{grid-auto-columns:80%;gap:12px}}
+
+.plan-page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  column-gap: 1rem;
+  row-gap: .5rem;
+}
+
+#plan-edit-access {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: .5rem;
+  margin-inline-start: auto;
+}
+
+.contact-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-bottom: .75rem;
+}
+.contact-group-heading h2 { margin: 0; }
+.contact-navigation { display: flex; gap: .35rem; }
+.contact-navigation button {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid #ded4d8;
+  border-radius: 8px;
+  background: white;
+  color: #790a29;
+  font-size: 1.5rem;
+}
+.contact-navigation button:hover { background: #f5e8ed; }
+.contact-track {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, min(80%, 20rem));
+  gap: .75rem;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: x mandatory;
+  padding: .2rem .2rem .65rem;
+}
+.contact-track .contact-directory-card {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid #ded4d8;
+  border-radius: 12px;
+  background: white;
+  scroll-snap-align: start;
+}
+.contact-track .contact-directory-title { grid-template-columns: 72px minmax(0, 1fr); }
+@media (min-width: 1100px) {
+  .contact-track { grid-auto-columns: calc((100% - 1.5rem) / 3); }
+  .contact-navigation { display: none; }
+}

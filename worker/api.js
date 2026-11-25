@@ -18,10 +18,20 @@ async function state(request, db) {
       details={...details,locality:d.locality.trim(),source:d.source,impact:d.impact.trim(),need:d.need,verification:d.verification,reportedAt:d.reportedAt,supportRequested:d.supportRequested===true||details.supportRequested===true};
     }
     if(stage===2){const a=body.assignment||{};if(a.shelter!=='Auditorio Municipal'||!['Brigada Atempan 01','Brigada Atempan 02'].includes(a.brigade))return Response.json({error:'Asignación inválida'},{status:400});details={...details,shelter:a.shelter,brigade:a.brigade,taskStatus:'Asignada'}}
-    if(stage===3&&!body.radio)details={...details,taskStatus:'Recibida por la brigada'};
+    if(stage===3&&!body.radio&&!body.attention)details={...details,taskStatus:'Recibida por la brigada'};
     if(stage===0)details={};
     const now = new Date().toISOString();
     const radio=body.radio;
+    const attention=body.attention;
+    const actor=stage===3&&(!attention||attention.fromBrigade===true)?(details.brigade||'Brigada Atempan 01'):'Coordinación municipal';
+    if(attention!==undefined&&attention!==null){
+      if(radio||stage!==3||current.stage!==3||
+        !['Pendiente','En atención','Atendida'].includes(attention.status)||
+        typeof attention.note!=='string'||!attention.note.trim()||attention.note.length>300){
+        return Response.json({error:'Seguimiento inválido para este folio'},{status:400});
+      }
+      details={...details,attention:{status:attention.status,note:attention.note.trim(),updated:now,actor}};
+    }
     if(radio){
       if(stage!==3||current.stage!==3||typeof radio.id!=='string'||!/^[0-9a-f-]{36}$/i.test(radio.id)){
         return Response.json({error:'Acción de radio inválida para este folio'},{status:400});
@@ -30,8 +40,9 @@ async function state(request, db) {
       const existing=messages.find(message=>message.id===radio.id);
       if(typeof radio.text==='string'){
         const text=radio.text.trim();
+        if(radio.type!==undefined&&!['report','instruction'].includes(radio.type))return new Response(null,{status:400});
         if(!text||text.length>320||messages.length>=30||existing)return new Response(null,{status:409});
-        details.radioMessages=[...messages,{id:radio.id,text,sentAt:now}];
+        details.radioMessages=[...messages,{id:radio.id,text,type:radio.type||'report',sentAt:now}];
       }else{
         if(!existing||existing.receivedAt)return new Response(null,{status:409});
         details.radioMessages=messages.map(message=>message.id===radio.id?{...message,receivedAt:now}:message);
@@ -39,8 +50,8 @@ async function state(request, db) {
     }
     let history=[];try{history=JSON.parse(current.history||'[]')}catch{}
     const titles=['Ejercicio reiniciado','Incidente registrado o actualizado','Asignación confirmada','Brigada acusó recibo'];
-    history=radio?history:stage===0?[]:[...history,{stage,title:titles[stage],created:now,actor:stage===3?(details.brigade||'Brigada Atempan 01'):'Coordinación municipal',summary:stage===1?`${count} personas · ${details.locality||'Atempan'}${details.supportRequested?' · apoyo regional solicitado':''}`:stage===2?`${details.shelter} · ${details.brigade}`:`Tarea recibida por ${details.brigade}`}];
-    const result = await db.prepare(`UPDATE exercise SET stage=?, count=CASE WHEN ?=1 THEN ? ELSE count END, updated=?, assigned=CASE WHEN ?=2 THEN ? WHEN ?<2 THEN NULL ELSE assigned END, received=CASE WHEN ?=3 THEN COALESCE(received, ?) ELSE NULL END, details=?, history=? WHERE id=1 AND updated=? AND (?=0 OR (?=stage+1 AND (?!=2 OR count<=40)) OR (?=stage AND (?=1 OR (?=3 AND ?=1))))`).bind(stage,stage,count,now,stage,now,stage,stage,now,JSON.stringify(details),JSON.stringify(history),revision,stage,stage,stage,stage,stage,stage,radio?1:0).run();
+    history=radio?history:stage===0?[]:[...history,{stage,title:attention?'Seguimiento actualizado':titles[stage],created:now,actor,summary:attention?`${details.attention.status} · ${details.attention.note}`:stage===1?`${count} personas · ${details.locality||'Atempan'}${details.supportRequested?' · apoyo regional solicitado':''}`:stage===2?`${details.shelter} · ${details.brigade}`:`Tarea recibida por ${details.brigade}`}];
+    const result = await db.prepare(`UPDATE exercise SET stage=?, count=CASE WHEN ?=1 THEN ? ELSE count END, updated=?, assigned=CASE WHEN ?=2 THEN ? WHEN ?<2 THEN NULL ELSE assigned END, received=CASE WHEN ?=3 THEN COALESCE(received, ?) ELSE NULL END, details=?, history=? WHERE id=1 AND updated=? AND (?=0 OR (?=stage+1 AND (?!=2 OR count<=40)) OR (?=stage AND (?=1 OR (?=3 AND ?=1))))`).bind(stage,stage,count,now,stage,now,stage,stage,now,JSON.stringify(details),JSON.stringify(history),revision,stage,stage,stage,stage,stage,stage,radio||attention?1:0).run();
     if (!result.meta.changes) return new Response(null,{status:409});
   } else if(request.method !== 'GET') return new Response(null,{status:405});
   const row=await db.prepare("SELECT stage,count,updated,assigned,received,details,history FROM exercise WHERE id=1").first();
