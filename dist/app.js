@@ -1,6 +1,6 @@
 const paths={inicio:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',avisos:'M5 17h14l-2-4V9a5 5 0 0 0-10 0v4z M10 20h4',refugios:'M12 22s8-9 8-14a8 8 0 1 0-16 0c0 5 8 14 8 14z M15 9a3 3 0 1 1-6 0 3 3 0 0 1 6 0',contactos:'M5 3h4l2 5-3 2q2 5 6 6l2-3 5 2v4q0 3-4 2Q4 18 3 6z',guia:'M3 5q5-2 9 1 4-3 9-1v14q-5-2-9 1-4-3-9-1z M12 6v14',coord:'M4 5h16v16H4z M8 9h8 M8 13h8 M8 17h5'};
 const icon=k=>'<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="'+paths[k]+'"/></svg>';
-const labels={inicio:'Inicio',avisos:'Avisos',refugios:'Refugios',contactos:'Contactos'};
+const labels={inicio:'Inicio',avisos:'Avisos',refugios:'Refugios',guia:'Mi plan',contactos:'Contactos'};
 const towns=['San Pedro Cholula','Atempan'];
 const places=[
 ['Refugio temporal de Cholula','Av. 14 Poniente 307, Centro',0,'Abierto','Rampa de entrada y sanitarios accesibles.'],
@@ -40,6 +40,31 @@ const alerts=[
   ['Inundación en Atempan','La mesa municipal revisa accesos y disponibilidad para alojar a las familias.','Reporte municipal de ejemplo']
 ];
 const stageName=['Sin incidente registrado','Pendiente de asignación','Brigada asignada','Recepción confirmada'];
+const checklist = [
+  'Acordar un punto de encuentro con mi familia',
+  'Anotar contactos de emergencia fuera del celular',
+  'Preparar agua, linterna y medicamentos personales',
+  'Guardar copias de documentos importantes',
+  'Consultar los refugios de mi municipio'
+];
+let prepared = [];
+try {
+  const saved = JSON.parse(localStorage.getItem('sicep.prepared') || '[]');
+  if (Array.isArray(saved)) prepared = saved.filter(i => Number.isInteger(i) && i >= 0 && i < checklist.length);
+} catch {}
+function preparation(){
+  const count = new Set(prepared).size;
+  return `${back()}<h1>Mi plan de emergencia</h1><p>Marca las tareas completadas. Tu avance se guarda en este navegador.</p>
+  <section class="card"><h2>Lista de preparación</h2><p id="prep-status" role="status">${count} de ${checklist.length} tareas completadas</p>
+  <progress aria-label="Avance de preparación" max="${checklist.length}" value="${count}"></progress>
+  ${checklist.map((item,i)=>`<label class="check"><input type="checkbox" data-prep="${i}" ${prepared.includes(i)?'checked':''}> ${item}</label>`).join('')}</section>
+  <a class="link" href="#refugios">Consultar refugios de ${towns[town]}</a>`;
+}
+function actionPanel(){
+  return `<section class="action-panel"><div class="action-heading"><h2>Acciones rápidas</h2><a class="btn" href="tel:911">${icon('contactos')} Llamar al 911</a></div>
+  <div class="tiles">${tile('avisos','Consultar avisos','Boletines oficiales y escenario municipal')}${tile('refugios','Encontrar un refugio','Ubicación y disponibilidad de demostración')}${tile('guia','Preparar a mi familia','Lista de tareas y avance personal')}</div></section>`;
+}
+
 function home(){
   const local=town===1, stage=incident?.stage||0;
   const active=local&&stage>0;
@@ -47,12 +72,12 @@ function home(){
   const rows=places.map((p,i)=>p[2]===town?`<a class="shelterLine" href="#detalle/${i}"><span><b>${p[0]}</b><small>${i===2&&incident?available+' lugares disponibles':'Cupo pendiente de confirmar'}</small></span>${pill(p[3])}</a>`:'').join('');
   const stamp=t=>t?new Intl.DateTimeFormat('es-MX',{dateStyle:'short',timeStyle:'short',timeZone:'America/Mexico_City'}).format(new Date(t)):'';
   return `<section class="hero"><article><small>Protección civil · Demostración</small><h1>Centro de información de Puebla</h1><p>Avisos, reportes municipales y refugios reunidos por territorio.</p></article><img src="assets/cholula.png" alt="Paisaje ilustrado de Cholula"></section>
-  <div class="scope"><div><small>Panorama municipal</small><h2>Situación en ${towns[town]}</h2></div>${select()}</div>
+  ${actionPanel()}<div class="scope"><div><small>Panorama municipal</small><h2>Situación en ${towns[town]}</h2></div>${select()}</div>
   <div class="stats"><a href="#avisos"><b>1</b> aviso municipal</a><a href="#refugios"><b>${places.filter(p=>p[2]===town&&p[3]==='Abierto').length}</b> refugios abiertos</a><span><b>${active?incident.count:local&&!incident?'—':0}</b> personas reportadas</span></div>
   <div class="grid"><section class="card"><small>Mesa municipal · ${connection}</small><h2>Seguimiento del incidente</h2>${active?`<span class="pill neutral">SICEP-AT-001</span><h3>Inundación · ${incident.count} personas</h3><p>${stageName[stage]}</p><ol><li>Municipio · Solicitud de alojamiento registrada.</li>${stage>=2?`<li>Coordinación · ${incident.count} lugares asignados en el Auditorio Municipal. ${stamp(incident.assigned)}</li>`:''}${stage>=3?`<li>Brigada · Recepción de la asignación confirmada. ${stamp(incident.received)}</li>`:''}</ol><a class="link" href="#coord">Abrir expediente y tareas de brigada</a>`:`<p>${local&&!incident?connection:'Sin solicitudes de alojamiento registradas en este municipio.'}</p>${local?'<a class="link" href="#coord">Registrar incidente</a>':''}`}</section>
   <section class="card notice"><small>Aviso municipal · Simulación</small><h2>${alerts[town][0]}</h2><p>${alerts[town][1]}</p><a class="link" href="#avisos">Ver boletín y fuente</a></section></div>
   <section class="card"><small>Catálogo y reporte de campo</small><h2>Disponibilidad de refugios</h2>${rows}<a class="link" href="#refugios">Consultar directorio y mapa</a></section>
-  <div class="tiles">${tile('guia','Guía de preparación','Consulta ciudadana')}${tile('contactos','Contactos','Directorio de emergencia')}${tile('coord','Coordinación','Mesa municipal de Atempan')}</div>`;
+  <div class="tiles">${tile('contactos','Contactos','Directorio de emergencia')}${tile('coord','Coordinación','Mesa municipal de Atempan')}</div>`;
 }
 function shelters(){let rows=places.map((p,i)=>p[2]===town?'<a class="row" href="#detalle/'+i+'"><span class="icon">'+icon('inicio')+'</span><div><b>'+p[0]+'</b><span class="muted">'+p[1]+'</span></div><span style="margin-left:auto">'+pill(p[3])+'</span></a>':'').join('');
 return back()+'<small style="display:block">Directorio de demostración</small><h1>Refugios temporales</h1>'+select()+'<div class="segment">'+['mapa','lista'].map(m=>'<button data-mode="'+m+'" aria-pressed="'+(m===mode)+'">'+(m==='mapa'?'Mapa':'Lista')+'</button>').join('')+'</div>'+(mode==='mapa'?(town===0?'<div class="map"><div class="mapinner" style="transform:scale('+zoom+')">'+[[0,54,10],[1,17,46]].map(([i,x,y])=>'<a class="pin" href="#detalle/'+i+'" aria-label="'+places[i][0]+'" style="left:'+x+'%;top:'+y+'%"></a>').join('')+'</div><div class="zoom"><button data-zoom="1" aria-label="Acercar">+</button><button data-zoom="-1" aria-label="Alejar">−</button></div></div><span class="muted">Mapa ilustrativo · Selecciona un refugio.</span>':'<p class="card">Ubicaciones pendientes de verificar. Consulta las direcciones del directorio.</p>'):'')+'<h2 style="margin-top:16px">'+(town===0?2:3)+' refugios en '+towns[town]+'</h2><div class="stack">'+rows+'</div>'}
@@ -79,11 +104,21 @@ function paintBulletins(){
   if(bulletinData && !bulletinData.items.length)list.append('Sin coincidencias en la portada consultada. ');
 }
 function render(){let [page,id]=(location.hash.slice(1)||'inicio').split('/');document.querySelector('#nav').innerHTML=Object.entries(labels).map(([k,v])=>'<a class="'+(k===(page==='detalle'?'refugios':page)?'on':'')+'" href="#'+k+'">'+icon(k)+v+'</a>').join('');let content;
-switch(page){case 'refugios':content=shelters();break;case 'detalle':content=detail(Number(id));break;case 'coord':town=1;content=coordination();break;case 'avisos':content=back()+'<h1>Avisos municipales</h1>'+select()+'<section class="card notice"><small>'+alerts[town][2]+'</small><h2>'+alerts[town][0]+'</h2><p>'+alerts[town][1]+'</p><p>Consulta la información oficial vigente en el portal estatal.</p>'+source+'</section><a class="link" href="#refugios">Ver refugios de '+towns[town]+'</a>';break;case 'contactos':content=back()+'<h1>Contactos de emergencia</h1><section class="card"><h2>Emergencias · 911</h2><p>Policía, bomberos y atención médica. Utiliza esta línea únicamente ante una emergencia real.</p><a class="btn" href="tel:911">'+icon('contactos')+' Llamar al 911</a></section><section class="card"><h2>Protección Civil</h2>'+source+'</section>';break;case 'guia':content=back()+'<h1>Guía de preparación</h1>'+[['Plan familiar','Acuerden un punto de encuentro y anoten los contactos de su red de apoyo.'],['Mochila de emergencia','Prepara agua, linterna, documentos y medicamentos personales.'],['Consulta de refugios','Selecciona tu municipio y revisa la dirección y el estado de cada refugio.']].map(([h,p])=>'<details class="card"><summary>'+h+'</summary><p>'+p+'</p></details>').join('')+'<a class="link" href="#refugios">Consultar refugios</a>';break;default:page='inicio';content=home()}
-if(page==='inicio')content=content.replace('<div class="scope">',bulletinPanel()+'<div class="scope">');
+switch(page){case 'refugios':content=shelters();break;case 'detalle':content=detail(Number(id));break;case 'coord':town=1;content=coordination();break;case 'avisos':content=back()+'<h1>Avisos municipales</h1>'+select()+'<section class="card notice"><small>'+alerts[town][2]+'</small><h2>'+alerts[town][0]+'</h2><p>'+alerts[town][1]+'</p><p>Consulta la información oficial vigente en el portal estatal.</p>'+source+'</section><a class="link" href="#refugios">Ver refugios de '+towns[town]+'</a>';break;case 'contactos':content=back()+'<h1>Contactos de emergencia</h1><section class="card"><h2>Emergencias · 911</h2><p>Policía, bomberos y atención médica. Utiliza esta línea únicamente ante una emergencia real.</p><a class="btn" href="tel:911">'+icon('contactos')+' Llamar al 911</a></section><section class="card"><h2>Protección Civil</h2>'+source+'</section>';break;case 'guia':content=preparation();break;default:page='inicio';content=home()}
+if(page==='inicio')content+=bulletinPanel();
 if(page==='avisos')content+=bulletinPanel();
 app.innerHTML=page==='inicio'?content:'<div class="sheet">'+content+'</div>';paintBulletins();document.title=(labels[page]||'Protección civil')+' · SICEP Puebla'}
 app.addEventListener('change',e=>{if(e.target.id==='town'){town=Number(e.target.value);zoom=1;render()}});
+app.addEventListener('change',e=>{
+  if(e.target.dataset.prep===undefined)return;
+  const index=Number(e.target.dataset.prep);
+  prepared=e.target.checked?[...new Set([...prepared,index])]:prepared.filter(i=>i!==index);
+  const status=document.querySelector('#prep-status');
+  status.textContent=prepared.length+' de '+checklist.length+' tareas completadas';
+  document.querySelector('progress').value=prepared.length;
+  try{localStorage.setItem('sicep.prepared',JSON.stringify(prepared))}
+  catch{status.textContent+=' · El navegador no pudo guardar el avance.'}
+});
 app.addEventListener('submit',e=>{e.preventDefault();update(1,Number(new FormData(e.target).get('count')))});
 app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.mode){mode=b.dataset.mode;render()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
 window.addEventListener('hashchange',()=>{render();scrollTo(0,0)});render();
