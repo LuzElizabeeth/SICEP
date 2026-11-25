@@ -27,10 +27,10 @@ const shelterMunicipality=()=>shelterTown??town;
 let town=1,mode='lista',zoom=1,incident=null;
 let shelterQuery='',shelterStatus='',shelterTown=null,shelterMapId=null;
 let hazardLayer='rain',selectedZone='Atempan';
-let roadReports=[],roadBlocked=[],roadMode='cargando',roadLoading=false,routeDestination=null,routeOrigin=null,routeOriginLabel='Centro del municipio · aproximado',routeReportPoint=null,routeMapMode='origin',demoHazard=null,routeResult=null,routeMapInstance=null,routeMapLayers=null,routeRequestId=0;
+let roadReports=[],roadBlocked=[],roadMode='cargando',roadLoading=false,routeDestination=null,routeOrigin=null,routeOriginLabel='Salida de referencia · aproximada',routeReportPoint=null,routeMapMode='origin',demoHazard=null,routeResult=null,routeMapInstance=null,routeMapLayers=null,routeRequestId=0;
 let revision='',connection='Cargando registro municipal…';
 const hosted=location.protocol!=='file:';
-const townCenters=[[19.0625,-98.3042],[19.8375,-97.4582]];
+const townCenters=[[19.0505,-98.3070],[19.8295,-97.4592]];
 const refugeCoordinates={0:{0:[19.0640,-98.3055],1:[19.0578,-98.3160]},1:{2:[19.8377,-97.4580]}};
 const hazardLabels={derrumbe:'Derrumbe o deslave',socavon:'Socavón',inundacion:'Inundación o corriente',obstruccion:'Calle obstruida',otro:'Otro peligro'};
 const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -212,7 +212,6 @@ function routesPage(){
   const openDestinations=places.map((p,i)=>p[2]===town&&p[3]==='Abierto'?[p,i]:null).filter(Boolean);
   if(!openDestinations.some(([,i])=>i===routeDestination))routeDestination=openDestinations[0]?.[1]??null;
   const destinations=openDestinations.map(([p,i])=>'<option value="'+i+'" '+(i===routeDestination?'selected':'')+'>'+escapeHTML(p[0])+'</option>').join('');
-  const modeNotice=roadMode==='compartido'?'<div class="route-storage shared">Reportes compartidos con el servidor municipal.</div>':'<div class="route-storage local">'+(hosted?'Registro compartido no disponible; este navegador guarda reportes locales.':'Demostración local: los reportes no se comparten.')+'</div>';
   const list=roadReports.filter(r=>Number(r.town)===town).slice(0,30);
   const reportRows=list.length?list.map(r=>{
     const photo=r.photo||(r.hasPhoto&&roadMode==='compartido'?'/api/routes/photo/'+encodeURIComponent(r.id):'');
@@ -222,10 +221,10 @@ function routesPage(){
     return '<article class="road-report"><div><span class="road-tag">'+escapeHTML(hazardLabels[r.hazard]||'Reporte ciudadano')+'</span> <span class="road-impact impact-'+escapeHTML(r.impact||'blocked')+'">'+status+'</span><h3>'+escapeHTML(place)+'</h3><small>'+escapeHTML(date)+' · Severidad '+escapeHTML(r.severity||'media')+' · Sin verificar</small>'+(r.note?'<p>'+escapeHTML(r.note)+'</p>':'')+'</div>'+(photo?'<a class="road-photo-link" href="'+escapeHTML(photo)+'" target="_blank" rel="noopener"><img class="road-photo" src="'+escapeHTML(photo)+'" alt="Foto adjunta al reporte" loading="lazy"></a>':'')+'</article>';
   }).join(''):'<p class="muted">Aún no hay reportes de '+escapeHTML(towns[town])+'.</p>';
   return back()+'<div class="map-heading"><div><small class="kicker">Calles reales · reporte comunitario</small><h1>Rutas</h1></div>'+select()+'</div>'+
-  '<section class="route-alert"><b>Encuentra un camino y revisa reportes cercanos</b><p>Elige tu salida en el mapa y un refugio del ejercicio. Las observaciones ciudadanas pueden influir en la alternativa sugerida, pero no son cierres oficiales.</p></section>'+modeNotice+
+  '<section class="route-alert"><b>Encuentra un camino y revisa reportes cercanos</b><p>Elige tu salida en el mapa y un refugio del ejercicio. Las observaciones ciudadanas pueden influir en la alternativa sugerida, pero no son cierres oficiales.</p></section>'+
   '<section class="route-section route-live"><div class="route-section-head"><div><small>Mapa interactivo · '+escapeHTML(towns[town])+'</small><h2>Tu trayecto</h2></div><label class="route-destination">Refugio destino<select id="route-destination" '+(routeDestination===null?'disabled':'')+'>'+destinations+'</select></label></div>'+
   '<div class="route-map-tools"><button type="button" data-route-mode="origin" class="'+(routeMapMode==='origin'?'selected':'')+'">Elegir salida</button><button type="button" data-route-mode="report" class="'+(routeMapMode==='report'?'selected':'')+'">Reportar peligro</button><button type="button" class="route-location" data-route-location>Usar mi ubicación</button></div>'+
-  '<p class="route-map-hint" id="route-map-hint">'+escapeHTML(routeMapMode==='origin'?'Toca el mapa para elegir el punto de salida.':'Toca el mapa para marcar el peligro.')+'</p><div id="route-real-map" class="route-real-map" role="application" aria-label="Mapa interactivo de calles y rutas"></div>'+
+  '<p class="route-map-hint" id="route-map-hint">'+escapeHTML(routeMapMode==='origin'?'Salida de referencia aproximada. Toca el mapa para elegir tu punto de partida.':'Toca el mapa para marcar el peligro.')+'</p><div id="route-real-map" class="route-real-map" role="application" aria-label="Mapa interactivo de calles y rutas"></div>'+
   '<div class="route-map-legend"><span><i class="legend-fast"></i>Más rápida</span><span><i class="legend-safer"></i>Menor riesgo estimado</span><span><i class="legend-hazard"></i>Reporte ciudadano</span><span><i class="legend-refuge"></i>Refugio del ejercicio</span></div>'+
   '<div class="route-route-cards" id="route-route-cards"><div class="route-loading">Calculando alternativas de calles…</div></div><p class="route-service-note">Calles OpenStreetMap · cálculo OSRM de demostración. Cobertura, desvíos y alternativas dependen del servicio público.</p><button type="button" class="route-sim-button" data-scenario="'+(demoHazard?'clear':'blocked')+'">'+(demoHazard?'Quitar peligro de prueba':'Probar un reporte y recalcular')+'</button></section>'+
   '<section class="route-section"><small>Colabora con tu comunidad</small><h2>Reportar una condición en la vía</h2><p>Toca “Reportar peligro” y coloca el marcador en el punto observado. La foto es opcional. Evita exponer rostros o placas.</p>'+
@@ -264,21 +263,22 @@ async function calculateRoutes(){
     const response=await fetch(url,{signal:AbortSignal.timeout(12000)});if(!response.ok)throw Error('El servicio de calles no respondió.');
     const data=await response.json();if(data.code!=='Ok'||!data.routes?.length)throw Error('No hay camino en la red vial para estos puntos.');
     if(requestId!==routeRequestId)return;
-    routeResult={routes:data.routes.map(r=>assessRoute(r,reports))};showRouteResults();paintRouteLayers();
+    routeResult={routes:data.routes.map(r=>assessRoute(r,reports)),snappedOrigin:data.waypoints?.[0]?.location?[data.waypoints[0].location[1],data.waypoints[0].location[0]]:origin,snappedDestination:data.waypoints?.[1]?.location?[data.waypoints[1].location[1],data.waypoints[1].location[0]]:destination};showRouteResults();paintRouteLayers();
   }catch(error){if(requestId!==routeRequestId)return;routeResult={error:error.name==='TimeoutError'?'El servicio de rutas tardó demasiado.':(error.message||'Servicio temporalmente no disponible.')};showRouteResults()}
 }
 function paintRouteLayers(){
   if(!routeMapInstance||!routeMapLayers)return;routeMapLayers.clearLayers();
   const destination=refugeCoordinates[town]?.[routeDestination]||townCenters[town];
-  L.marker(destination,{icon:L.divIcon({className:'route-marker refuge-marker',html:'<span>R</span>',iconSize:[34,34],iconAnchor:[17,17]})}).bindPopup('<b>Refugio del ejercicio</b><br>'+escapeHTML(places[routeDestination]?.[0]||'Refugio')).addTo(routeMapLayers);
-  L.marker(routeOrigin,{icon:L.divIcon({className:'route-marker origin-marker',html:'<span>●</span>',iconSize:[28,28],iconAnchor:[14,14]})}).bindPopup('Salida seleccionada').addTo(routeMapLayers);
+  const routeStart=routeResult?.snappedOrigin||routeOrigin,routeEnd=routeResult?.snappedDestination||destination;
+  L.marker(routeEnd,{icon:L.divIcon({className:'route-marker refuge-marker',html:'<span>R</span>',iconSize:[34,34],iconAnchor:[17,17]})}).bindPopup('<b>Refugio del ejercicio</b><br>'+escapeHTML(places[routeDestination]?.[0]||'Refugio')+'<br>Acceso aproximado desde la vía').addTo(routeMapLayers);
+  L.marker(routeStart,{icon:L.divIcon({className:'route-marker origin-marker',html:'<span>●</span>',iconSize:[28,28],iconAnchor:[14,14]})}).bindPopup('Salida · inicio ajustado a la calle más cercana').addTo(routeMapLayers);
   const reports=[...roadReports.filter(r=>Number(r.town)===town),...(demoHazard?.town===town?[demoHazard]:[])];
   for(const report of reports){const lat=Number(report.latitude??report.lat),lon=Number(report.longitude??report.lon);if(!Number.isFinite(lat)||!Number.isFinite(lon))continue;L.circleMarker([lat,lon],{radius:9,color:'#fff',weight:2,fillColor:report.impact==='blocked'?'#d9363e':report.impact==='partial'?'#e9a528':'#159969',fillOpacity:.95}).bindPopup('<b>'+escapeHTML(hazardLabels[report.hazard]||'Reporte')+'</b><br>'+escapeHTML(report.impact==='blocked'?'No transitable':report.impact==='partial'?'Paso parcial':'Paso posible')+' · sin verificar').addTo(routeMapLayers)}
   if(routeReportPoint)L.circleMarker(routeReportPoint,{radius:10,color:'#fff',weight:3,fillColor:'#d9363e',fillOpacity:1}).bindPopup('Punto del reporte').addTo(routeMapLayers);
   const all=routeResult?.routes||[];
-  all.forEach((route,index)=>{const latlngs=route.geometry.coordinates.map(([lon,lat])=>[lat,lon]);L.polyline(latlngs,{color:index===0?'#3977bd':'#94a3b8',weight:index===0?5:4,opacity:index===0?.8:.5,dashArray:index===0?'':'7 8'}).addTo(routeMapLayers)});
+  all.forEach((route,index)=>{const latlngs=route.geometry.coordinates.map(([lon,lat])=>[lat,lon]);if(index===0)L.polyline(latlngs,{color:'#fff',weight:18,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(routeMapLayers);L.polyline(latlngs,{color:index===0?'#075bd8':'#8492a6',weight:index===0?13:5,opacity:index===0?1:.58,dashArray:index===0?'':'8 9',lineCap:'round',lineJoin:'round'}).addTo(routeMapLayers)});
   const best=all.filter(r=>r.blocked===0).sort((a,b)=>a.adjustedDuration-b.adjustedDuration)[0];
-  if(best)L.polyline(best.geometry.coordinates.map(([lon,lat])=>[lat,lon]),{color:'#159969',weight:7,opacity:.9}).addTo(routeMapLayers);
+  if(best){const safeLatLngs=best.geometry.coordinates.map(([lon,lat])=>[lat,lon]);L.polyline(safeLatLngs,{color:'#fff',weight:19,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(routeMapLayers);L.polyline(safeLatLngs,{color:'#007a4e',weight:13,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(routeMapLayers)}
   if(all.length){const bounds=L.latLngBounds(all.flatMap(r=>r.geometry.coordinates.map(([lon,lat])=>[lat,lon])));routeMapInstance.fitBounds(bounds,{padding:[35,35],maxZoom:15})}
 }
 function initializeRouteMap(){
@@ -505,7 +505,7 @@ function changeMunicipality(value){
   zoom=1;
   routeDestination=null;
   routeOrigin=[...townCenters[town]];
-  routeOriginLabel='Centro del municipio · aproximado';
+  routeOriginLabel='Salida de referencia · aproximada';
   routeReportPoint=null;
   demoHazard=null;
   routeResult=null;
