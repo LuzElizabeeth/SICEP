@@ -123,3 +123,6 @@
 
 .supply-item{position:relative}.supply-item details[open] summary{position:absolute;top:12px;right:3px}
 @media(max-width:520px){.supply-item details[open] summary{position:static;text-align:right;margin:0 3px 6px 0}}
+
+.supply-item summary{position:absolute;top:12px;right:3px}
+@media(max-width:520px){.supply-item summary{position:static}.supply-item details[open] summary{position:static;text-align:right;margin:0 3px 6px 0}}
