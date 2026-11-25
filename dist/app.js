@@ -1,7 +1,7 @@
 const paths={inicio:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',avisos:'M5 17h14l-2-4V9a5 5 0 0 0-10 0v4z M10 20h4',refugios:'M12 22s8-9 8-14a8 8 0 1 0-16 0c0 5 8 14 8 14z M15 9a3 3 0 1 1-6 0 3 3 0 0 1 6 0',contactos:'M5 3h4l2 5-3 2q2 5 6 6l2-3 5 2v4q0 3-4 2Q4 18 3 6z',guia:'M3 5q5-2 9 1 4-3 9-1v14q-5-2-9 1-4-3-9-1z M12 6v14',coord:'M4 5h16v16H4z M8 9h8 M8 13h8 M8 17h5'};
 paths.mapa=paths.refugios;paths.planes=paths.guia;
 const icon=k=>'<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="'+paths[k]+'"/></svg>';
-const labels={inicio:'Inicio',avisos:'Avisos',refugios:'Refugios',guia:'Mi plan',contactos:'Contactos'};
+const labels={inicio:'Inicio',avisos:'Avisos',mapa:'Mi ciudad',refugios:'Refugios',guia:'Mi plan',contactos:'Contactos'};
 const towns=['San Pedro Cholula','Atempan'];
 const places=[
 ['Refugio temporal de Cholula','Av. 14 Poniente 307, Centro',0,'Abierto','Rampa de entrada y sanitarios accesibles.'],
@@ -10,6 +10,7 @@ const places=[
 ['Esc. 1º de enero','2 Sur y 3 Oriente',1,'Acceso bloqueado','Capacidad nominal de 300 personas.'],
 ['Esc. Manuel Acuña Hernández','Av. Benito Juárez 147, Tacopan',1,'Sin confirmar','Capacidad nominal de 250 personas.']];
 let town=1,mode='mapa',zoom=1,incident=null;
+let hazardLayer='rain',selectedZone='Atempan';
 let revision='',connection='Cargando registro municipal…';
 const hosted=location.protocol!=='file:';
 async function sync(){
@@ -62,16 +63,54 @@ function preparation(){
   <a class="link" href="#refugios">Consultar refugios de ${towns[town]}</a>`;
 }
 const planTopics = [
-  ['lluvias','⛈','Emergencias hidrometeorológicas'],
-  ['sismos','⌂','Plan operativo de sismos'],
+  ['lluvias','⛈','Lluvia intensa e inundaciones'],
+  ['sismos','⌂','Plan Sismo Puebla'],
   ['incendios','♨','Contingencias de incendios'],
   ['invierno','❄','Emergencias de temporada invernal'],
   ['volcan','△','Plan Popocatépetl'],
   ['peregrinaciones','♧','Protección y seguridad en peregrinaciones'],
   ['pirotecnia','✧','Programa especial de pirotecnia']
 ];
+function volcanoPlan(){
+  return `<div class="guidance-back">${back('inicio','Inicio')}</div><small class="kicker">Programa Especial para Contingencias</small><h1>Plan Popocatépetl</h1>
+  <p class="guidance-intro">Guía práctica basada en el programa estatal para preparar a tu familia y actuar con información oficial.</p>
+  <section class="volcano-dashboard" aria-labelledby="volcano-dashboard-title"><div class="volcano-dashboard-head"><div><small>Último reporte de CENAPRED · 24 de noviembre de 2026, 11:00 h</small><h2 id="volcano-dashboard-title">Monitoreo del Popocatépetl</h2></div><a class="link" href="https://www.cenapred.gob.mx/reportesVolcanesMX/Procesos?tipoProceso=detallesUltimoReporteVolcan" target="_blank" rel="noopener noreferrer">Abrir reporte ↗</a></div><div class="volcano-dashboard-grid"><section class="volcano-indicator"><h3>Semáforo de alerta volcánica</h3><strong class="volcano-level">AMARILLO · FASE 2</strong><div class="traffic-light" role="img" aria-label="Semáforo de alerta: amarillo, fase 2"><span class="traffic-lamp traffic-green"></span><span class="traffic-lamp traffic-yellow active"></span><span class="traffic-lamp traffic-red"></span></div></section><section class="volcano-indicator wind-indicator"><h3>Dirección del viento</h3><strong class="wind-direction">ESTE</strong><div class="compass" role="img" aria-label="Brújula señalando al Este"><span class="compass-n">N</span><span class="compass-e">E</span><span class="compass-s">S</span><span class="compass-w">O</span><span class="compass-arrow">➤</span></div></section></div><p class="volcano-report-note">Dato del reporte del 24 de noviembre; confirma en CENAPRED si ya se publicó uno más reciente.</p></section>
+  <aside class="guidance-lead"><b>Consulta el nivel de alerta vigente con CENAPRED.</b><p>El semáforo puede cambiar. Esta guía no es un reporte en tiempo real ni sustituye una indicación de Protección Civil. Si se ordena evacuar, sigue la ruta indicada por las autoridades.</p><a class="link" href="https://www.cenapred.gob.mx/reportesVolcanesMX/Procesos?tipoProceso=detallesUltimoReporteVolcan" target="_blank" rel="noopener noreferrer">Ver monitoreo oficial del Popocatépetl ↗</a></aside>
+  <div class="guidance-grid">
+    <section class="guidance-card"><small>Conoce los peligros</small><h2>Riesgos contemplados</h2><ul><li>Caída de ceniza y acumulación en techos.</li><li>Emisión de fragmentos y flujos piroclásticos cerca del volcán.</li><li>Lahares: lodo y escombro que pueden bajar por barrancas y cauces, especialmente con lluvia.</li></ul></section>
+    <section class="guidance-card"><small>Antes</small><h2>Prepárate en familia</h2><ul><li>Acuerda un punto de encuentro y quién ayudará a niñas, personas mayores o con movilidad limitada.</li><li>Ubica los puntos de reunión, rutas y refugios definidos por tu localidad.</li><li>Ten documentos importantes listos y prepara alimento y agua para tus animales.</li><li>Consulta avisos oficiales y evita compartir rumores.</li></ul></section>
+    <section class="guidance-card"><small>Si cae ceniza</small><h2>Protege tu salud y tu hogar</h2><ul><li>Evita actividades al aire libre; si debes salir, cubre nariz, boca y ojos.</li><li>Cierra puertas y ventanas y cubre depósitos de agua, alimentos y comida de mascotas.</li><li>Retira la ceniza con cuidado y evita que llegue a coladeras o drenajes.</li></ul><a class="link" href="https://www.gob.mx/cenapred/es/articulos/volcan-popocatepetl-caida-de-ceniza?idiom=es" target="_blank" rel="noopener noreferrer">Recomendaciones de CENAPRED ante ceniza ↗</a></section>
+    <section class="guidance-card"><small>Si las autoridades indican evacuar</small><h2>Sal por la ruta asignada</h2><ul><li>Dirígete al punto de reunión y aborda el transporte indicado por tu localidad.</li><li>Sigue las instrucciones oficiales y acude al refugio que te asignen.</li><li>No te acerques al volcán ni permanezcas en barrancas ante lluvias fuertes.</li></ul></section>
+  </div>
+  <p class="guidance-source">Fuente base: Programa Especial para Contingencias del Volcán Popocatépetl, Gobierno de Puebla, pp. 12 y 19–25. <a class="link" href="https://proteccioncivil.puebla.gob.mx/images/site/planes/PROGRAMaESPECIAL-POPOCATEPETL.pdf" target="_blank" rel="noopener noreferrer">Consultar programa completo ↗</a></p>`;
+}
+function rainPlan(){
+  return `<div class="guidance-back">${back('inicio','Inicio')}</div><small class="kicker">Programa Especial para la Temporada de Lluvias y Ciclones Tropicales</small><h1>Lluvia intensa e inundaciones</h1>
+  <p class="guidance-intro">Prepara una ruta segura antes de la lluvia y evita exponerte a corrientes, zonas inundadas y laderas inestables.</p>
+  <aside class="guidance-lead"><b>Revisa avisos meteorológicos y de Protección Civil de tu localidad.</b><p>Las condiciones cambian por zona. Esta página ofrece preparación general y no sustituye una alerta o instrucción oficial.</p><a class="link" href="https://smn.conagua.gob.mx/es/pronostico-meteorologico-general" target="_blank" rel="noopener noreferrer">Consultar pronóstico del Servicio Meteorológico Nacional ↗</a></aside>
+  <div class="guidance-grid">
+    <section class="guidance-card"><small>Antes</small><h2>Prepara tu casa y tu salida</h2><ul><li>Limpia coladeras y desagües solo si puedes hacerlo con seguridad; no te acerques a ríos crecidos.</li><li>Identifica un lugar alto, una ruta y el refugio temporal señalado por tu municipio.</li><li>Guarda documentos en una bolsa sellada; prepara radio, lámpara, botiquín y agua potable.</li><li>Asegura objetos sueltos y prevé cómo proteger a tus animales.</li></ul></section>
+    <section class="guidance-card"><small>Durante la lluvia</small><h2>Aléjate del agua y las laderas</h2><ul><li>Nunca camines ni conduzcas por corrientes o caminos inundados; no cruces ríos, arroyos ni puentes cubiertos por agua.</li><li>Evita barrancas, cauces, postes y cables eléctricos, y zonas con señales de deslave.</li><li>Si Protección Civil indica evacuar, sal de inmediato hacia el lugar seguro señalado.</li><li>Si el agua entra a tu casa, evita zonas eléctricas; corta la energía solo si hacerlo es seguro.</li></ul></section>
+    <section class="guidance-card"><small>Después</small><h2>Regresa con autorización</h2><ul><li>No regreses hasta que las autoridades confirmen que es seguro.</li><li>No consumas agua ni alimentos que tocaron el agua de inundación.</li><li>Evita cables caídos, daños estructurales y agua estancada; reporta peligros a Protección Civil.</li></ul><a class="link" href="https://www.gob.mx/cenapred/es/articulos/que-son-las-inundaciones-subitas-y-que-papel-juegan-las-lluvias?idiom=es" target="_blank" rel="noopener noreferrer">Guía de CENAPRED para inundaciones súbitas ↗</a></section>
+  </div>
+  <p class="guidance-source">Fuente base: Programa Especial de Protección Civil para la Temporada de Lluvias y Ciclones Tropicales 2026, Gobierno de Puebla, pp. 33–36 y 43. <a class="link" href="https://proteccioncivil.puebla.gob.mx/images/site/planes/PLAN-HIDROMETEOROLOGICO.pdf" target="_blank" rel="noopener noreferrer">Consultar programa completo ↗</a></p>`;
+}
+function earthquakePlan(){
+  return `<div class="guidance-back">${back('inicio','Inicio')}</div><small class="kicker">Programa Especial de Protección Civil · Plan Sismo Puebla</small><h1>Sismos</h1>
+  <p class="guidance-intro">Identifica zonas de menor riesgo y acuerda con tu familia qué hacer antes, durante y después de un sismo.</p>
+  <aside class="guidance-lead"><b>La alerta sísmica puede no activarse en todos los sismos.</b><p>El Plan Sismo Puebla indica que SASMEX no alerta ante sismos menores ni ante sismos fuera de la cobertura de sus sensores. Mantén listo tu plan y consulta información oficial.</p><a class="link" href="https://www.ssn.unam.mx/" target="_blank" rel="noopener noreferrer">Ver información del Servicio Sismológico Nacional ↗</a></aside>
+  <div class="guidance-grid">
+    <section class="guidance-card"><small>Antes</small><h2>Reduce riesgos</h2><ul><li>Asegura muebles y objetos que puedan caer; despeja las rutas de salida.</li><li>Ubica las zonas de menor riesgo dentro y fuera de tu casa y fija un punto de reunión.</li><li>Prepara contactos, botiquín, radio, lámpara y documentos importantes.</li><li>Practica simulacros y asigna tareas a cada integrante de la familia.</li></ul></section>
+    <section class="guidance-card"><small>Durante</small><h2>Protégete</h2><ul><li>Mantén la calma y dirígete a la zona de menor riesgo que identificaste.</li><li>Aléjate de ventanas, vidrios y objetos que puedan caer; protege tu cabeza.</li><li>No uses elevadores ni escaleras mientras tiembla. Sigue el protocolo del inmueble.</li></ul><a class="link" href="https://www.gob.mx/cenapred/articulos/conocemas-como-funciona-la-alerta-sismica" target="_blank" rel="noopener noreferrer">Qué hacer ante la alerta sísmica ↗</a></section>
+    <section class="guidance-card"><small>Después</small><h2>Revisa y mantente a salvo</h2><ul><li>Verifica si hay personas lesionadas y solicita ayuda si hace falta.</li><li>No uses edificios dañados ni vuelvas a entrar hasta que Protección Civil lo indique.</li><li>Evita cables caídos y posibles fugas de gas; prepárate para réplicas.</li><li>Usa el teléfono solo para emergencias y consulta reportes oficiales.</li></ul></section>
+  </div>
+  <p class="guidance-source">Fuente base: Programa Especial de Protección Civil “Plan Sismo Puebla”, Gobierno de Puebla, pp. 16–17 y 35–39. <a class="link" href="https://proteccioncivil.puebla.gob.mx/images/site/planes/PROGRAMAESPECIAL-EMERGENCIASSISMICAS.pdf" target="_blank" rel="noopener noreferrer">Consultar programa completo ↗</a></p>`;
+}
 function plans(id){
   const plan = planTopics.find(topic=>topic[0]===id);
+  if(id==='volcan')return volcanoPlan();
+  if(id==='lluvias')return rainPlan();
+  if(id==='sismos')return earthquakePlan();
   if(plan)return `${back('planes','Planes de Protección Civil')}<span class="icon" aria-hidden="true">${plan[1]}</span><h1>${plan[2]}</h1><section class="card"><p>Documento oficial pendiente de incorporar.</p><a class="link" href="#guia">Abrir mi plan de emergencia</a></section>`;
   return `${back()}<h1>Planes de Protección Civil</h1><div class="tiles">${planTopics.map(([key,symbol,title])=>`<a class="tile" href="#planes/${key}"><span class="icon" aria-hidden="true">${symbol}</span><b>${title}</b><span class="chev" aria-hidden="true">›</span></a>`).join('')}</div>`;
 }
@@ -84,11 +123,50 @@ function contacts(){
   return `${back()}<h1>Números de emergencia y atención</h1><div class="stack">${emergencyNumbers.map(([number,title,description])=>`<section class="card"><h2>${title}</h2><p>${description}</p><a class="btn" href="tel:${number.replaceAll(' ','')}">${icon('contactos')} Llamar al ${number}</a></section>`).join('')}</div><p class="muted">Fuente: Secretaría de Salud del Estado de Puebla.</p>`;
 }
 function riskMap(){
-  const boxes=['-98.34,19.03,-98.27,19.09','-97.49,19.79,-97.40,19.88'];
-  const [west,south,east,north]=boxes[town].split(',').map(Number);
-  const bounds=encodeURIComponent(boxes[town]);
-  const marker=encodeURIComponent(`${(south+north)/2},${(west+east)/2}`);
-  return `${back()}<h1>Mapa municipal</h1>${select()}<section class="card map-card"><iframe title="Mapa de ${towns[town]} en OpenStreetMap" src="https://www.openstreetmap.org/export/embed.html?bbox=${bounds}&amp;layer=mapnik&amp;marker=${marker}"></iframe><p class="muted">Marcador de referencia del área mostrada. Los refugios y avisos de demostración se consultan por municipio.</p></section>`;
+  const monitors=[
+    ['volcano','🌋','Actividad volcánica','CENAPRED','https://www.cenapred.gob.mx/es/PDF/2025-02-15.pdf'],
+    ['rain','🌧','Lluvia e inundaciones','Protección Civil Puebla','https://proteccioncivil.puebla.gob.mx/images/site/planes/PLAN-HIDROMETEOROLOGICO.pdf'],
+    ['quake','⚡','Sismos','Plan Sismo Puebla','https://proteccioncivil.puebla.gob.mx/images/site/planes/PROGRAMAESPECIAL-EMERGENCIASSISMICAS.pdf']
+  ];
+  const zones=[
+    ['Huauchinango',20.174,-98.052,'medium','high','low','Sierra Norte'],
+    ['Xicotepec',20.276,-97.961,'low','high','low','Sierra Norte'],
+    ['Zacatlán',19.933,-97.961,'low','high','low','Sierra Norte'],
+    ['Chignahuapan',19.838,-98.031,'low','high','medium','Sierra Norte'],
+    ['Tetela de Ocampo',19.817,-97.806,'low','high','medium','Sierra Norte'],
+    ['Cuetzalan',20.018,-97.523,'low','high','low','Sierra Nororiental'],
+    ['Teziutlán',19.817,-97.359,'low','high','low','Sierra Nororiental'],
+    ['Atempan',19.839,-97.458,'low','high','medium','Sierra Nororiental'],
+    ['Tlatlauquitepec',19.852,-97.495,'low','high','medium','Sierra Nororiental'],
+    ['San Martín Texmelucan',19.285,-98.438,'medium','medium','medium','Valle de Texmelucan'],
+    ['Huejotzingo',19.159,-98.407,'medium','medium','low','Valle de Texmelucan'],
+    ['San Pedro Cholula',19.058,-98.306,'medium','medium','medium','Zona metropolitana'],
+    ['Puebla',19.043,-98.198,'low','medium','high','Zona metropolitana'],
+    ['Amozoc',19.043,-98.045,'low','medium','high','Zona metropolitana'],
+    ['Tepeaca',18.967,-97.900,'low','medium','high','Valle de Tepeaca'],
+    ['Atlixco',18.908,-98.437,'high','medium','medium','Valle de Atlixco'],
+    ['Tianguismanalco',18.976,-98.455,'high','medium','medium','Entorno del Popocatépetl'],
+    ['Tochimilco',18.900,-98.572,'high','medium','medium','Entorno del Popocatépetl'],
+    ['San Nicolás de los Ranchos',19.072,-98.483,'high','medium','medium','Entorno del Popocatépetl'],
+    ['Izúcar de Matamoros',18.601,-98.462,'low','low','high','Mixteca poblana'],
+    ['Tehuacán',18.462,-97.393,'low','low','high','Valle de Tehuacán']
+  ];
+  const levels={low:['Bajo','low'],medium:['Moderado','medium'],high:['Alto','high']};
+  const layerNames={volcano:'Actividad volcánica',rain:'Lluvia e inundaciones',quake:'Sismos'};
+  const current=zones.find(z=>z[0]===selectedZone)||zones.find(z=>z[0]===towns[town])||zones[7];
+  const selectedRisk=levels[current[hazardLayer==='volcano'?3:hazardLayer==='rain'?4:5]];
+  const markers=zones.map(z=>{
+    const risk=levels[z[hazardLayer==='volcano'?3:hazardLayer==='rain'?4:5]];
+    const x=(z[2]+99.0)/2.35*100;
+    const y=(20.95-z[1])/3.35*100;
+    return `<button type="button" class="risk-marker risk-${risk[1]} ${z[0]===current[0]?'selected':''}" style="left:${x}%;top:${y}%" data-zone="${z[0]}" aria-label="${z[0]}: riesgo simulado ${risk[0]}" title="${z[0]} · ${risk[0]} (simulación)"><span aria-hidden="true">!</span></button>`;
+  }).join('');
+  const bounds=encodeURIComponent('-99.0,17.6,-96.65,20.95');
+  const marker=encodeURIComponent(`${current[1]},${current[2]}`);
+  return `${back()}<div class="map-heading"><div><small class="kicker">Escenario de simulación</small><h1>Mi ciudad</h1></div>${select()}</div>
+  <div class="map-monitors" role="group" aria-label="Capas de simulación">${monitors.map(([key,symbol,title,source])=>`<button type="button" class="map-monitor ${hazardLayer===key?'active':''}" data-layer="${key}" aria-pressed="${hazardLayer===key}"><span class="map-monitor-icon" aria-hidden="true">${symbol}</span><span class="map-monitor-copy"><b>${title}</b><small>${source} · capa del ejercicio</small></span></button>`).join('')}</div>
+  <section class="risk-summary"><div><h2>Escenario: ${layerNames[hazardLayer]}</h2><p>Distribución ilustrativa basada en zonas de susceptibilidad y regionalización publicadas.</p></div><div class="risk-badges"><span class="risk-badge risk-high">● Alto</span><span class="risk-badge risk-medium">● Moderado</span><span class="risk-badge risk-low">● Bajo</span></div></section>
+  <section class="card map-card"><div class="map-shell risk-map-shell"><iframe title="Mapa de referencia del estado de Puebla" src="https://www.openstreetmap.org/export/embed.html?bbox=${bounds}&amp;layer=mapnik&amp;marker=${marker}"></iframe><div class="risk-markers" aria-label="Marcadores de riesgo simulado">${markers}</div><aside class="map-popup"><small>Zona seleccionada · ${current[6]}</small><h2>${current[0]}</h2><p>${layerNames[hazardLayer]}: <b class="risk-text-${selectedRisk[1]}">${selectedRisk[0]} · simulación</b></p><small>Referencia territorial; no representa una alerta vigente ni una medición en tiempo real.</small></aside><div class="map-live-pill simulation-pill"><span aria-hidden="true">●</span> SIMULACIÓN · Puebla</div></div><p class="map-method"><b>Cómo leerlo:</b> los colores son un escenario para el prototipo. Lluvia: prioriza la mayor concurrencia de susceptibilidades del norte y centro-norte señalada por Protección Civil. Sismos: toma como referencia la clasificación municipal del Plan Sismo. Volcán: representa cercanía a las zonas de peligro del mapa de CENAPRED. Confirma siempre con autoridades.</p><div class="map-sources"><a href="${monitors[0][4]}" target="_blank" rel="noopener noreferrer">Mapa de peligro volcánico CENAPRED ↗</a><a href="${monitors[1][4]}" target="_blank" rel="noopener noreferrer">Mapa hidrometeorológico estatal ↗</a><a href="${monitors[2][4]}" target="_blank" rel="noopener noreferrer">Regionalización sísmica estatal ↗</a></div></section>`;
 }
 
 const actionCards = {
@@ -126,8 +204,7 @@ function home(){
   return `<section class="hero"><article><small>Protección civil · Demostración</small><h1>Centro de información de Puebla</h1><p>Avisos, reportes municipales y refugios reunidos por territorio.</p></article><img src="assets/cholula.png" alt="Paisaje ilustrado de Cholula"></section>
   ${actionPanel()}<div class="scope"><div><small>Panorama municipal</small><h2>Situación en ${towns[town]}</h2></div>${select()}</div>
   <div class="stats"><a href="#avisos"><b>1</b> aviso municipal</a><a href="#refugios"><b>${places.filter(p=>p[2]===town&&p[3]==='Abierto').length}</b> refugios abiertos</a><span><b>${active?incident.count:local&&!incident?'—':0}</b> personas reportadas</span></div>
-  <div class="grid"><section class="card"><small>Mesa municipal · ${connection}</small><h2>Seguimiento del incidente</h2>${active?`<span class="pill neutral">SICEP-AT-001</span><h3>Inundación · ${incident.count} personas</h3><p>${stageName[stage]}</p><ol><li>Municipio · Solicitud de alojamiento registrada.</li>${stage>=2?`<li>Coordinación · ${incident.count} lugares asignados en el Auditorio Municipal. ${stamp(incident.assigned)}</li>`:''}${stage>=3?`<li>Brigada · Recepción de la asignación confirmada. ${stamp(incident.received)}</li>`:''}</ol><a class="link" href="#coord">Abrir expediente y tareas de brigada</a>`:`<p>${local&&!incident?connection:'Sin solicitudes de alojamiento registradas en este municipio.'}</p>${local?'<a class="link" href="#coord">Registrar incidente</a>':''}`}</section>
-  <section class="card notice"><small>Aviso municipal · Simulación</small><h2>${alerts[town][0]}</h2><p>${alerts[town][1]}</p><a class="link" href="#avisos">Ver boletín y fuente</a></section></div>
+  <section class="monitoring" aria-labelledby="monitoring-title"><small>Protección civil</small><h2 id="monitoring-title">Monitoreo</h2><div class="tiles monitoring-tiles"><a class="tile monitoring-tile" href="#planes/volcan"><img src="assets/POPOCATEPETL.jpg" alt="Vista del volcán Popocatépetl"><b>Actividad volcánica</b></a><a class="tile monitoring-tile" href="#planes/lluvias"><img src="assets/LLUVIAS.jpeg" alt="Lluvia intensa en una zona urbana"><b>Lluvia intensa e inundaciones</b></a><a class="tile monitoring-tile" href="#planes/sismos"><img src="assets/SISMO.jpeg" alt="Mapa de intensidad sísmica"><b>Sismos</b></a></div></section>
   <section class="card"><small>Catálogo y reporte de campo</small><h2>Disponibilidad de refugios</h2>${rows}<a class="link" href="#refugios">Consultar directorio y mapa</a></section>
   <div class="tiles">${tile('contactos','Contactos','Directorio de emergencia')}${tile('coord','Coordinación','Mesa municipal de Atempan')}</div>`;
 }
@@ -161,7 +238,7 @@ if(page==='inicio')content+=bulletinPanel();
 if(page==='avisos')content+=bulletinPanel();
 if(page!=='inicio')content+=actionPanel(page);
 app.innerHTML=page==='inicio'?content:'<div class="sheet">'+content+'</div>';paintBulletins();document.title=(labels[page]||'Protección civil')+' · SICEP Puebla'}
-app.addEventListener('change',e=>{if(e.target.id==='town'){town=Number(e.target.value);zoom=1;render()}});
+app.addEventListener('change',e=>{if(e.target.id==='town'){town=Number(e.target.value);selectedZone=towns[town];zoom=1;render()}});
 app.addEventListener('change',e=>{
   if(e.target.dataset.prep===undefined)return;
   const index=Number(e.target.dataset.prep);
@@ -173,7 +250,7 @@ app.addEventListener('change',e=>{
   catch{status.textContent+=' · El navegador no pudo guardar el avance.'}
 });
 app.addEventListener('submit',e=>{e.preventDefault();update(1,Number(new FormData(e.target).get('count')))});
-app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.mode){mode=b.dataset.mode;render()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
+app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.layer){hazardLayer=b.dataset.layer;render()}if(b.dataset.zone){selectedZone=b.dataset.zone;render()}if(b.dataset.mode){mode=b.dataset.mode;render()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
 window.addEventListener('hashchange',()=>{render();scrollTo(0,0)});render();
 
 sync();if(hosted)setInterval(()=>{if(!document.hidden)sync()},15000);
