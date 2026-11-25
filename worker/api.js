@@ -14,23 +14,25 @@ async function state(request, db) {
 }
 
 async function routeReports(request,db){
-  await db.prepare("CREATE TABLE IF NOT EXISTS route_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, town INTEGER NOT NULL, street TEXT NOT NULL, hazard TEXT NOT NULL, severity TEXT NOT NULL DEFAULT 'medium', impact TEXT NOT NULL DEFAULT 'blocked', note TEXT NOT NULL DEFAULT '', photo TEXT, created TEXT NOT NULL)").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS route_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, town INTEGER NOT NULL, street TEXT NOT NULL, latitude REAL, longitude REAL, hazard TEXT NOT NULL, severity TEXT NOT NULL DEFAULT 'medium', impact TEXT NOT NULL DEFAULT 'blocked', note TEXT NOT NULL DEFAULT '', photo TEXT, created TEXT NOT NULL)").run();
   const columns=await db.prepare("PRAGMA table_info(route_reports)").all(),names=(columns.results||[]).map(column=>column.name);
   if(!names.includes('severity'))await db.prepare("ALTER TABLE route_reports ADD COLUMN severity TEXT NOT NULL DEFAULT 'medium'").run();
   if(!names.includes('impact'))await db.prepare("ALTER TABLE route_reports ADD COLUMN impact TEXT NOT NULL DEFAULT 'blocked'").run();
+  if(!names.includes('latitude'))await db.prepare('ALTER TABLE route_reports ADD COLUMN latitude REAL').run();
+  if(!names.includes('longitude'))await db.prepare('ALTER TABLE route_reports ADD COLUMN longitude REAL').run();
   if(request.method==='POST'){
     if(request.headers.get('Origin')!==new URL(request.url).origin)return new Response(null,{status:403});
     let body;try{body=await request.json()}catch{return Response.json({error:'JSON inválido'},{status:400})}
     const prefixes={0:'cholula',1:'atempan'};
     const hazards=['derrumbe','socavon','inundacion','obstruccion','otro'];
-    const {town,street,hazard,severity='medium',impact='blocked',note='',photo=null}=body||{};
-    const segmentPattern=typeof street==='string'&&new RegExp('^'+prefixes[town]+'-(h-[0-3]-[0-2]|v-[0-2]-[0-3])$').test(street);
-    if(!Number.isInteger(town)||!prefixes[town]||!segmentPattern||!hazards.includes(hazard)||!['low','medium','high'].includes(severity)||!['blocked','partial','passable'].includes(impact)||typeof note!=='string'||note.length>350)return Response.json({error:'Reporte inválido'},{status:400});
+    const {town,street,hazard,severity='medium',impact='blocked',note='',photo=null,latitude,longitude}=body||{};
+    const validPoint=Number.isFinite(latitude)&&Number.isFinite(longitude)&&latitude>=17.5&&latitude<=21.3&&longitude>=-99.3&&longitude<=-96.3;
+    if(!Number.isInteger(town)||!prefixes[town]||typeof street!=='string'||street.length>100||!validPoint||!hazards.includes(hazard)||!['low','medium','high'].includes(severity)||!['blocked','partial','passable'].includes(impact)||typeof note!=='string'||note.length>350)return Response.json({error:'Reporte inválido'},{status:400});
     if(photo!==null&&(typeof photo!=='string'||photo.length>210000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(photo)))return Response.json({error:'Foto inválida o demasiado grande'},{status:413});
     const created=new Date().toISOString();
-    await db.prepare("INSERT INTO route_reports (town,street,hazard,severity,impact,note,photo,created) VALUES (?,?,?,?,?,?,?,?)").bind(town,street,hazard,severity,impact,note.trim(),photo,created).run();
+    await db.prepare("INSERT INTO route_reports (town,street,latitude,longitude,hazard,severity,impact,note,photo,created) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(town,street,latitude,longitude,hazard,severity,impact,note.trim(),photo,created).run();
   }else if(request.method!=='GET')return new Response(null,{status:405});
-  const reports=await db.prepare("SELECT id,town,street,hazard,severity,impact,note,created,CASE WHEN photo IS NULL THEN 0 ELSE 1 END AS hasPhoto FROM route_reports ORDER BY id DESC LIMIT 50").all();
+  const reports=await db.prepare("SELECT id,town,street,latitude,longitude,hazard,severity,impact,note,created,CASE WHEN photo IS NULL THEN 0 ELSE 1 END AS hasPhoto FROM route_reports ORDER BY id DESC LIMIT 50").all();
   const blocked=await db.prepare("SELECT DISTINCT CAST(town AS TEXT)||':'||street AS key FROM route_reports WHERE impact='blocked'").all();
   return Response.json({reports:reports.results||[],blocked:(blocked.results||[]).map(r=>r.key)},{headers:{'Cache-Control':'no-store'}});
 }

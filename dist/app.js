@@ -11,37 +11,13 @@ const places=[
 ['Esc. Manuel Acuña Hernández','Av. Benito Juárez 147, Tacopan',1,'Sin confirmar','Capacidad nominal de 250 personas.']];
 let town=1,mode='mapa',zoom=1,incident=null;
 let hazardLayer='rain',selectedZone='Atempan';
-let roadReports=[],roadBlocked=[],roadMode='cargando',roadLoading=false,routeDestination=null,routeOrigin=0,routeSelectedStreet=null,demoHazard=null;
+let roadReports=[],roadBlocked=[],roadMode='cargando',roadLoading=false,routeDestination=null,routeOrigin=null,routeOriginLabel='Centro del municipio · aproximado',routeReportPoint=null,routeMapMode='origin',demoHazard=null,routeResult=null,routeMapInstance=null,routeMapLayers=null,routeRequestId=0;
 let revision='',connection='Cargando registro municipal…';
 const hosted=location.protocol!=='file:';
-const corridorNames=[
-  {rows:['Av. 14 Poniente','Calle 9 Norte','Blvd. Forjadores','Periférico Ecológico'],cols:['Recta a Cholula','Av. Morelos','Calle 5 de Mayo','Av. Miguel Alemán']},
-  {rows:['Carretera Federal 129','Av. Benito Juárez','Camino a Tacopan','Camino a Tlatlauquitepec'],cols:['Acceso Norte','Calle del Centro','Acceso Sur','Camino a Teziutlán']}
-];
+const townCenters=[[19.0625,-98.3042],[19.8375,-97.4582]];
+const refugeCoordinates={0:{0:[19.0640,-98.3055],1:[19.0578,-98.3160]},1:{2:[19.8377,-97.4580]}};
 const hazardLabels={derrumbe:'Derrumbe o deslave',socavon:'Socavón',inundacion:'Inundación o corriente',obstruccion:'Calle obstruida',otro:'Otro peligro'};
 const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function routeGraph(){
-  const edges=[],nodes=Array.from({length:16},(_,i)=>({id:i,row:Math.floor(i/4),col:i%4,x:85+(i%4)*170,y:48+Math.floor(i/4)*105}));
-  const prefix=town===0?'cholula':'atempan';
-  for(let row=0;row<4;row++)for(let col=0;col<3;col++){const a=row*4+col,b=a+1;edges.push({id:prefix+'-h-'+row+'-'+col,a,b,street:corridorNames[town].rows[row],label:corridorNames[town].rows[row]+' · tramo '+(col+1),base:1})}
-  for(let row=0;row<3;row++)for(let col=0;col<4;col++){const a=row*4+col,b=a+4;edges.push({id:prefix+'-v-'+row+'-'+col,a,b,street:corridorNames[town].cols[col],label:corridorNames[town].cols[col]+' · tramo '+(row+1),base:1})}
-  return {nodes,edges};
-}
-function shortestRoute(graph,start,goal,riskAware,risks){
-  const distance=new Map(graph.nodes.map(n=>[n.id,Infinity])),previous=new Map(),pending=new Set(graph.nodes.map(n=>n.id));distance.set(start,0);
-  while(pending.size){let current=null;for(const node of pending)if(current===null||distance.get(node)<distance.get(current))current=node;
-    if(current===null||!Number.isFinite(distance.get(current))||current===goal)break;pending.delete(current);
-    for(const edge of graph.edges){const next=edge.a===current?edge.b:edge.b===current?edge.a:null;if(next===null||!pending.has(next))continue;
-      const risk=risks.get(edge.id);if(riskAware&&risk?.blocked)continue;
-      const cost=edge.base+(riskAware&&risk?risk.penalty:0);
-      if(distance.get(current)+cost<distance.get(next)){distance.set(next,distance.get(current)+cost);previous.set(next,{node:current,edge})}
-    }
-  }
-  if(!Number.isFinite(distance.get(goal)))return null;
-  const nodes=[goal],edges=[];let at=goal;
-  while(at!==start){const step=previous.get(at);if(!step)return null;edges.unshift(step.edge);at=step.node;nodes.unshift(at)}
-  return {nodes,edges,cost:distance.get(goal),km:edges.length*.25};
-}
 function localRoadReports(){try{const v=JSON.parse(localStorage.getItem('sicep.route-reports.v1')||'[]');return Array.isArray(v)?v:[]}catch{return[]}}
 async function refreshRoadReports(){
   if(roadLoading)return;
@@ -216,73 +192,90 @@ function riskMap(){
 }
 
 function routesPage(){
-  const graph=routeGraph();
-  const activeReports=[...roadReports.filter(r=>Number(r.town)===town),...(demoHazard&&demoHazard.town===town?[demoHazard]:[])];
-  const byEdge=new Map();for(const report of activeReports){if(!byEdge.has(report.street))byEdge.set(report.street,[]);byEdge.get(report.street).push(report)}
-  const risks=new Map();
-  for(const edge of graph.edges){const reports=byEdge.get(edge.id)||[],blocked=roadBlocked.includes(town+':'+edge.id)||reports.some(r=>r.impact==='blocked');if(!reports.length&&!blocked)continue;
-    const weights={low:3,medium:9,high:20},severity=Math.max(...reports.map(r=>weights[r.severity]||9),0),types=new Set(reports.map(r=>r.hazard));
-    const confidence=Math.min(.9,.35+Math.max(0,reports.length-1)*.12),uncertainty=types.size>1?16:reports.length>1?3:6;
-    const impact=reports.some(r=>r.impact==='partial')?1.5:reports.some(r=>r.impact==='passable')?.6:1;
-    risks.set(edge.id,{blocked,penalty:severity*confidence*impact+uncertainty,reports});
-  }
+  if(!routeOrigin)routeOrigin=[...townCenters[town]];
   const openDestinations=places.map((p,i)=>p[2]===town&&p[3]==='Abierto'?[p,i]:null).filter(Boolean);
   if(!openDestinations.some(([,i])=>i===routeDestination))routeDestination=openDestinations[0]?.[1]??null;
-  const destinationName=routeDestination===null?'refugio por confirmar':places[routeDestination][0];
   const destinations=openDestinations.map(([p,i])=>'<option value="'+i+'" '+(i===routeDestination?'selected':'')+'>'+escapeHTML(p[0])+'</option>').join('');
-  const destinationNodes=town===0?{0:15,1:11}:{2:15},goal=destinationNodes[routeDestination]??15;
-  const origins=[[0,'Acceso norte'],[5,'Zona centro'],[10,'Punto de reunión'],[15,'Acceso sur']];
-  if(!origins.some(([node])=>node===routeOrigin))routeOrigin=0;
-  const originOptions=origins.map(([node,name])=>'<option value="'+node+'" '+(node===routeOrigin?'selected':'')+'>'+name+'</option>').join('');
-  const baseline=shortestRoute(graph,routeOrigin,goal,false,risks),safe=shortestRoute(graph,routeOrigin,goal,true,risks);
-  const baselineBlocked=baseline?baseline.edges.filter(edge=>risks.get(edge.id)?.blocked):[];
-  const routeLine=(edge,offset,className)=>{const a=graph.nodes[edge.a],b=graph.nodes[edge.b],dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy),ox=-dy/len*offset,oy=dx/len*offset;return '<line x1="'+(a.x+ox)+'" y1="'+(a.y+oy)+'" x2="'+(b.x+ox)+'" y2="'+(b.y+oy)+'" class="'+className+'" aria-hidden="true"></line>'};
-  const lines=graph.edges.map(edge=>{
-    const risk=risks.get(edge.id),baseClass='network-edge '+(risk?.blocked?'network-blocked':risk?'network-risk':'');
-    const selectable='<line x1="'+graph.nodes[edge.a].x+'" y1="'+graph.nodes[edge.a].y+'" x2="'+graph.nodes[edge.b].x+'" y2="'+graph.nodes[edge.b].y+'" class="'+baseClass+'" data-street="'+edge.id+'" tabindex="0" role="button" aria-label="Seleccionar '+escapeHTML(edge.label)+' para reportar"></line>';
-    const base=baseline?.edges.some(e=>e.id===edge.id)?routeLine(edge,-5,'route-baseline-line'):'';
-    const safer=safe?.edges.some(e=>e.id===edge.id)?routeLine(edge,5,'route-safe-line'):'';
-    return selectable+base+safer;
-  }).join('');
-  const nodes=graph.nodes.map(node=>{const label=node.id===routeOrigin?'O':node.id===goal?'R':'';return '<g class="network-node '+(label?'network-node-active':'')+'" transform="translate('+node.x+' '+node.y+')" aria-label="'+(label==='O'?'Origen':label==='R'?'Refugio':'Cruce')+'"><circle r="'+(label?15:8)+'"></circle>'+(label?'<text y="5">'+label+'</text>':'')+'</g>'}).join('');
-  const edgeOptions=graph.edges.map(edge=>'<option value="'+edge.id+'" '+(edge.id===routeSelectedStreet?'selected':'')+'>'+escapeHTML(edge.label)+'</option>').join('');
-  if(!graph.edges.some(edge=>edge.id===routeSelectedStreet))routeSelectedStreet=graph.edges[0].id;
-  const modeNotice=roadMode==='compartido'
-    ?'<div class="route-storage shared">Reportes compartidos con el servidor municipal.</div>'
-    :'<div class="route-storage local">'+(hosted?'No se pudo conectar al registro compartido. Los reportes de esta sesión se guardan solo en este navegador.':'Modo demostración: los reportes se guardan solo en este navegador y no se comparten con otras personas.')+'</div>';
+  const modeNotice=roadMode==='compartido'?'<div class="route-storage shared">Reportes compartidos con el servidor municipal.</div>':'<div class="route-storage local">'+(hosted?'Registro compartido no disponible; este navegador guarda reportes locales.':'Demostración local: los reportes no se comparten.')+'</div>';
   const list=roadReports.filter(r=>Number(r.town)===town).slice(0,30);
   const reportRows=list.length?list.map(r=>{
-    const street=(routeGraph().edges.find(edge=>edge.id===r.street)?.label)||'Tramo reportado';
-    const photo=r.photo|| (r.hasPhoto&&roadMode==='compartido'?'/api/routes/photo/'+encodeURIComponent(r.id):'');
+    const photo=r.photo||(r.hasPhoto&&roadMode==='compartido'?'/api/routes/photo/'+encodeURIComponent(r.id):'');
     const date=r.created?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeStyle:'short'}).format(new Date(r.created)):'Reciente';
-    return '<article class="road-report"><div><span class="road-tag">'+escapeHTML(hazardLabels[r.hazard]||'Reporte ciudadano')+'</span> <span class="road-impact impact-'+escapeHTML(r.impact||'blocked')+'">'+(r.impact==='blocked'?'Tramo excluido':r.impact==='partial'?'Paso parcial':'Paso reportado')+'</span><h3>'+escapeHTML(street)+'</h3><small>'+escapeHTML(date)+' · Severidad '+escapeHTML(r.severity||'media')+' · Pendiente de verificación</small>'+(r.note?'<p>'+escapeHTML(r.note)+'</p>':'')+'</div>'+(photo?'<a class="road-photo-link" href="'+escapeHTML(photo)+'" target="_blank" rel="noopener"><img class="road-photo" src="'+escapeHTML(photo)+'" alt="Foto adjunta al reporte de '+escapeHTML(street)+'" loading="lazy"></a>':'')+'</article>';
-  }).join(''):'<p class="muted">Aún no hay reportes de calle para '+escapeHTML(towns[town])+'.</p>';
-  const routeCard=(route,title,details)=>{
-    if(!route)return '<article class="route-option unavailable"><span>Sin ruta calculable</span><h3>'+title+'</h3><small>'+details+'</small></article>';
-    const hazardCount=route.edges.filter(edge=>risks.has(edge.id)).length;
-    return '<article class="route-option"><span class="'+(hazardCount?'route-caution':'route-ok')+'">'+(hazardCount?'⚠ Pasa por '+hazardCount+' tramo(s) reportado(s)':'● Sin reportes activos en el trayecto')+'</span><h3>'+title+'</h3><small>'+details+'</small><div class="route-metrics"><b>'+route.edges.length+' tramos</b><b>'+route.km.toFixed(2)+' km aprox.</b></div></article>';
-  };
-  const baseCard=routeCard(baseline,'Ruta más corta','Origen → '+escapeHTML(destinationName)+' · Ignora reportes para comparar');
-  const safeCard=routeCard(safe,'Ruta con menor riesgo','Origen → '+escapeHTML(destinationName)+' · Considera severidad, paso y reportes');
-  const loading=roadMode==='cargando';
-  const demoNotice=demoHazard?.town===town?'<div class="route-demo-note">Escenario de prueba activo: derrumbe simulado en '+escapeHTML(graph.edges.find(e=>e.id===demoHazard.street)?.label||'un tramo')+'. Solo existe en esta sesión.</div>':'';
-  const legend=[['network-edge','Red vial esquemática'],['route-baseline-line','Ruta más corta'],['route-safe-line','Ruta con menor riesgo'],['network-blocked','Tramo excluido']];
-  return back()+'<div class="map-heading"><div><small class="kicker">Comparación de seguridad vial</small><h1>Rutas</h1></div>'+select()+'</div>'+
-  '<section class="route-alert"><b>Encuentra una alternativa con menos riesgos</b><p>Comparamos el trayecto más corto con otro que considera reportes de la comunidad. Los tramos marcados como no transitables se excluyen y las nuevas alertas recalculan la ruta automáticamente. Es una simulación de apoyo, no navegación oficial.</p></section>'+
-  modeNotice+
-  demoNotice+
-  '<section class="route-section"><div class="route-section-head"><div><small>Origen y destino</small><h2>¿A dónde necesitas llegar?</h2></div><div class="route-selects"><label>Punto de salida<select id="route-origin">'+originOptions+'</select></label><label>Refugio destino<select id="route-destination">'+destinations+'</select></label></div></div>'+
-  '<div class="route-map" role="group" aria-label="Red vial esquemática con rutas comparadas"><svg viewBox="0 0 680 420" aria-labelledby="route-map-title"><title id="route-map-title">Mapa esquemático de rutas para '+escapeHTML(towns[town])+'</title>'+lines+nodes+'</svg></div><div class="route-map-legend">'+legend.map(([klass,label])=>'<span><i class="'+klass+'"></i>'+label+'</span>').join('')+'</div>'+
-  '<div class="route-options route-comparison">'+baseCard+safeCard+'</div>'+
-  (baselineBlocked.length?'<p class="route-warning">La ruta más corta atraviesa '+baselineBlocked.length+' tramo(s) reportado(s) como no transitables; queda solo como comparación y no se recomienda.</p>':'')+
-  (loading?'<p role="status" class="route-loading">Consultando reportes antes de calcular rutas…</p>':'')+
-  '<p class="route-explainer">Cada segmento es esquemático. La distancia solo ilustra el cálculo; no representa calles, tiempos ni condiciones reales.</p><button type="button" class="route-sim-button" data-scenario="'+(demoHazard?'clear':'blocked')+'">'+(demoHazard?'Quitar escenario de prueba':'Probar un derrumbe y ver el recálculo')+'</button></section>'+
-  '<section class="route-section"><small>Participación ciudadana</small><h2>Reportar una condición en la vía</h2><p>Elige un segmento del mapa, describe lo que ves y adjunta una foto si puedes. Los reportes son provisionales hasta que una autoridad los confirme.</p>'+
-  '<form id="route-report-form" class="route-form"><label>Segmento de la vía<select name="street" required>'+edgeOptions+'</select></label><label>Situación observada<select name="hazard" required>'+Object.entries(hazardLabels).map(([id,name])=>'<option value="'+id+'">'+name+'</option>').join('')+'</select></label><label>Severidad observada<select name="severity"><option value="high">Alta</option><option value="medium" selected>Media</option><option value="low">Baja</option></select></label><label>¿Cómo está el paso?<select name="impact"><option value="blocked" selected>No transitable · excluir tramo</option><option value="partial">Paso parcial · penalizar ruta</option><option value="passable">Paso posible · tomar con precaución</option></select></label><label class="route-full">Descripción breve <span class="muted">(opcional)</span><textarea name="note" maxlength="350" rows="3" placeholder="Describe lo que observaste, sin incluir datos personales"></textarea></label><label class="route-full">Foto <span class="muted">(opcional)</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp"></label><small class="route-privacy">La imagen se comparte con el reporte. Evita incluir rostros, placas o información privada. Los reportes inician con confianza baja.</small><button type="submit" '+(loading?'disabled':'')+'>Enviar reporte y recalcular</button><p class="route-form-status" role="status" aria-live="polite"></p></form></section>'+
-  '<section class="route-section"><div class="route-section-head"><div><small>Observaciones comunitarias</small><h2>Reportes de '+escapeHTML(towns[town])+'</h2></div><button type="button" class="route-refresh" data-refresh-routes>Actualizar</button></div><div class="road-report-list">'+list+'</div></section>'+
-  '<p class="route-disclaimer">Esta demostración no garantiza una ruta segura ni confirma cierres reales. Ante una emergencia, sigue a Protección Civil y llama al 911.</p>';
+    const place=Number.isFinite(Number(r.latitude??r.lat))?'Ubicación marcada en el mapa · '+Number(r.latitude??r.lat).toFixed(4)+', '+Number(r.longitude??r.lon).toFixed(4):'Reporte anterior sin ubicación';
+    const status=r.impact==='blocked'?'No transitable · evitar proximidad':r.impact==='partial'?'Paso parcial · penalización estimada':'Paso posible · precaución';
+    return '<article class="road-report"><div><span class="road-tag">'+escapeHTML(hazardLabels[r.hazard]||'Reporte ciudadano')+'</span> <span class="road-impact impact-'+escapeHTML(r.impact||'blocked')+'">'+status+'</span><h3>'+escapeHTML(place)+'</h3><small>'+escapeHTML(date)+' · Severidad '+escapeHTML(r.severity||'media')+' · Sin verificar</small>'+(r.note?'<p>'+escapeHTML(r.note)+'</p>':'')+'</div>'+(photo?'<a class="road-photo-link" href="'+escapeHTML(photo)+'" target="_blank" rel="noopener"><img class="road-photo" src="'+escapeHTML(photo)+'" alt="Foto adjunta al reporte" loading="lazy"></a>':'')+'</article>';
+  }).join(''):'<p class="muted">Aún no hay reportes de '+escapeHTML(towns[town])+'.</p>';
+  return back()+'<div class="map-heading"><div><small class="kicker">Calles reales · reporte comunitario</small><h1>Rutas</h1></div>'+select()+'</div>'+
+  '<section class="route-alert"><b>Encuentra un camino y revisa reportes cercanos</b><p>Elige tu salida en el mapa y un refugio del ejercicio. Las observaciones ciudadanas pueden influir en la alternativa sugerida, pero no son cierres oficiales.</p></section>'+modeNotice+
+  '<section class="route-section route-live"><div class="route-section-head"><div><small>Mapa interactivo · '+escapeHTML(towns[town])+'</small><h2>Tu trayecto</h2></div><label class="route-destination">Refugio destino<select id="route-destination" '+(routeDestination===null?'disabled':'')+'>'+destinations+'</select></label></div>'+
+  '<div class="route-map-tools"><button type="button" data-route-mode="origin" class="'+(routeMapMode==='origin'?'selected':'')+'">Elegir salida</button><button type="button" data-route-mode="report" class="'+(routeMapMode==='report'?'selected':'')+'">Reportar peligro</button><button type="button" class="route-location" data-route-location>Usar mi ubicación</button></div>'+
+  '<p class="route-map-hint" id="route-map-hint">'+escapeHTML(routeMapMode==='origin'?'Toca el mapa para elegir el punto de salida.':'Toca el mapa para marcar el peligro.')+'</p><div id="route-real-map" class="route-real-map" role="application" aria-label="Mapa interactivo de calles y rutas"></div>'+
+  '<div class="route-map-legend"><span><i class="legend-fast"></i>Más rápida</span><span><i class="legend-safer"></i>Menor riesgo estimado</span><span><i class="legend-hazard"></i>Reporte ciudadano</span><span><i class="legend-refuge"></i>Refugio del ejercicio</span></div>'+
+  '<div class="route-route-cards" id="route-route-cards"><div class="route-loading">Calculando alternativas de calles…</div></div><p class="route-service-note">Calles OpenStreetMap · cálculo OSRM de demostración. Cobertura, desvíos y alternativas dependen del servicio público.</p><button type="button" class="route-sim-button" data-scenario="'+(demoHazard?'clear':'blocked')+'">'+(demoHazard?'Quitar peligro de prueba':'Probar un reporte y recalcular')+'</button></section>'+
+  '<section class="route-section"><small>Colabora con tu comunidad</small><h2>Reportar una condición en la vía</h2><p>Toca “Reportar peligro” y coloca el marcador en el punto observado. La foto es opcional. Evita exponer rostros o placas.</p>'+
+  '<form id="route-report-form" class="route-form"><p class="route-point-summary route-full" id="route-point-summary">'+(routeReportPoint?'Ubicación seleccionada.':'Primero marca la ubicación en el mapa.')+'</p><label>Situación observada<select name="hazard" required>'+Object.entries(hazardLabels).map(([id,name])=>'<option value="'+id+'">'+name+'</option>').join('')+'</select></label><label>Severidad<select name="severity"><option value="high">Alta</option><option value="medium" selected>Media</option><option value="low">Baja</option></select></label><label>Condición del paso<select name="impact"><option value="blocked" selected>No transitable · evitar proximidad</option><option value="partial">Paso parcial · penalizar</option><option value="passable">Paso posible · precaución</option></select></label><label>Descripción <span class="muted">(opcional)</span><textarea name="note" maxlength="350" rows="3" placeholder="Describe lo que observaste"></textarea></label><label class="route-full">Foto <span class="muted">(opcional)</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp"></label><small class="route-privacy">Los reportes son comunitarios y no verificados. La app no confirma cierres ni garantiza rutas seguras.</small><button type="submit" '+(!routeReportPoint?'disabled':'')+'>Enviar reporte</button><p class="route-form-status" role="status" aria-live="polite"></p></form></section>'+
+  '<section class="route-section"><div class="route-section-head"><div><small>Observaciones comunitarias</small><h2>Reportes de '+escapeHTML(towns[town])+'</h2></div><button type="button" class="route-refresh" data-refresh-routes>Actualizar</button></div><div class="road-report-list">'+reportRows+'</div></section>'+
+  '<p class="route-disclaimer">No uses esta demostración como navegación de emergencia. Sigue instrucciones de Protección Civil y llama al 911.</p>';
 }
-
+function haversineMeters(a,b){const rad=x=>x*Math.PI/180,R=6371000,dLat=rad(b[0]-a[0]),dLon=rad(b[1]-a[1]),v=Math.sin(dLat/2)**2+Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(v))}
+function assessRoute(route,reports){
+  const pts=(route.geometry?.coordinates||[]).map(([lon,lat])=>[lat,lon]);
+  let blocked=0,penalty=0,near=[];
+  for(const report of reports){const lat=Number(report.latitude??report.lat),lon=Number(report.longitude??report.lon);if(!Number.isFinite(lat)||!Number.isFinite(lon))continue;
+    let distance=Infinity;for(let i=0;i<pts.length;i+=Math.max(1,Math.floor(pts.length/150))){distance=Math.min(distance,haversineMeters(pts[i],[lat,lon]))}
+    if(distance<100){near.push({...report,distance});if(report.impact==='blocked')blocked++;else if(report.impact==='partial')penalty+=Math.max(45,220-Number(report.severity==='high'?0:report.severity==='medium'?45:90));else penalty+=25}
+  }
+  return {...route,blocked,penalty,near,adjustedDuration:route.duration+penalty};
+}
+function formatDuration(seconds){const minutes=Math.max(1,Math.round(seconds/60));return minutes<60?minutes+' min':Math.floor(minutes/60)+' h '+minutes%60+' min'}
+function showRouteResults(){
+  const root=document.querySelector('#route-route-cards');if(!root)return;
+  if(!routeResult){root.innerHTML='<div class="route-empty"><b>Calculando calles disponibles…</b></div>';return}
+  if(routeResult.error){root.innerHTML='<div class="route-empty"><b>No se pudo calcular una ruta ahora.</b><p>'+escapeHTML(routeResult.error)+' Reintenta en unos momentos o consulta otra fuente de navegación.</p></div>';return}
+  const fastest=routeResult.routes[0],suggested=routeResult.routes.filter(r=>r.blocked===0).sort((a,b)=>a.adjustedDuration-b.adjustedDuration)[0];
+  root.innerHTML='<article class="route-option"><span class="route-ok">● '+(fastest.blocked?'Cruza '+fastest.blocked+' reporte(s) cercano(s)':'Sin reportes bloqueados cercanos')+'</span><h3>Más rápida</h3><p>'+ (fastest.distance/1000).toFixed(1)+' km · '+formatDuration(fastest.duration)+'</p><small>Ruta base calculada por calles.</small></article>'+
+    (suggested?'<article class="route-option route-safer-option"><span class="route-ok">● Sin reportes marcados “no transitable” cerca</span><h3>Menor riesgo estimado</h3><p>'+ (suggested.distance/1000).toFixed(1)+' km · '+formatDuration(suggested.adjustedDuration)+'</p><small>'+suggested.near.length+' reporte(s) próximos; penalización heurística, sin verificación.</small></article>':'<article class="route-option unavailable"><span>Sin alternativa calculable libre de reportes bloqueados cercanos</span><p>El mapa muestra la ruta base. Confirma con Protección Civil antes de desplazarte.</p></article>')+
+    '<p class="route-warning route-full">“Cerca” significa menos de 100 m de la línea de ruta; es una aproximación, no identifica el tramo exacto.</p>';
+}
+async function calculateRoutes(){
+  const requestId=++routeRequestId;routeResult=null;showRouteResults();
+  if(routeDestination===null){routeResult={error:'Este municipio no tiene un refugio abierto del ejercicio en el registro.'};showRouteResults();return}
+  const destination=refugeCoordinates[town]?.[routeDestination]||townCenters[town],origin=routeOrigin||townCenters[town];
+  const reports=[...roadReports.filter(r=>Number(r.town)===town),...(demoHazard?.town===town?[demoHazard]:[])];
+  try{
+    const coords=origin[1]+','+origin[0]+';'+destination[1]+','+destination[0];
+    const url='https://router.project-osrm.org/route/v1/driving/'+coords+'?alternatives=3&steps=true&overview=full&geometries=geojson';
+    const response=await fetch(url,{signal:AbortSignal.timeout(12000)});if(!response.ok)throw Error('El servicio de calles no respondió.');
+    const data=await response.json();if(data.code!=='Ok'||!data.routes?.length)throw Error('No hay camino en la red vial para estos puntos.');
+    if(requestId!==routeRequestId)return;
+    routeResult={routes:data.routes.map(r=>assessRoute(r,reports))};showRouteResults();paintRouteLayers();
+  }catch(error){if(requestId!==routeRequestId)return;routeResult={error:error.name==='TimeoutError'?'El servicio de rutas tardó demasiado.':(error.message||'Servicio temporalmente no disponible.')};showRouteResults()}
+}
+function paintRouteLayers(){
+  if(!routeMapInstance||!routeMapLayers)return;routeMapLayers.clearLayers();
+  const destination=refugeCoordinates[town]?.[routeDestination]||townCenters[town];
+  L.marker(destination,{icon:L.divIcon({className:'route-marker refuge-marker',html:'<span>R</span>',iconSize:[34,34],iconAnchor:[17,17]})}).bindPopup('<b>Refugio del ejercicio</b><br>'+escapeHTML(places[routeDestination]?.[0]||'Refugio')).addTo(routeMapLayers);
+  L.marker(routeOrigin,{icon:L.divIcon({className:'route-marker origin-marker',html:'<span>●</span>',iconSize:[28,28],iconAnchor:[14,14]})}).bindPopup('Salida seleccionada').addTo(routeMapLayers);
+  const reports=[...roadReports.filter(r=>Number(r.town)===town),...(demoHazard?.town===town?[demoHazard]:[])];
+  for(const report of reports){const lat=Number(report.latitude??report.lat),lon=Number(report.longitude??report.lon);if(!Number.isFinite(lat)||!Number.isFinite(lon))continue;L.circleMarker([lat,lon],{radius:9,color:'#fff',weight:2,fillColor:report.impact==='blocked'?'#d9363e':report.impact==='partial'?'#e9a528':'#159969',fillOpacity:.95}).bindPopup('<b>'+escapeHTML(hazardLabels[report.hazard]||'Reporte')+'</b><br>'+escapeHTML(report.impact==='blocked'?'No transitable':report.impact==='partial'?'Paso parcial':'Paso posible')+' · sin verificar').addTo(routeMapLayers)}
+  if(routeReportPoint)L.circleMarker(routeReportPoint,{radius:10,color:'#fff',weight:3,fillColor:'#d9363e',fillOpacity:1}).bindPopup('Punto del reporte').addTo(routeMapLayers);
+  const all=routeResult?.routes||[];
+  all.forEach((route,index)=>{const latlngs=route.geometry.coordinates.map(([lon,lat])=>[lat,lon]);L.polyline(latlngs,{color:index===0?'#3977bd':'#94a3b8',weight:index===0?5:4,opacity:index===0?.8:.5,dashArray:index===0?'':'7 8'}).addTo(routeMapLayers)});
+  const best=all.filter(r=>r.blocked===0).sort((a,b)=>a.adjustedDuration-b.adjustedDuration)[0];
+  if(best)L.polyline(best.geometry.coordinates.map(([lon,lat])=>[lat,lon]),{color:'#159969',weight:7,opacity:.9}).addTo(routeMapLayers);
+  if(all.length){const bounds=L.latLngBounds(all.flatMap(r=>r.geometry.coordinates.map(([lon,lat])=>[lat,lon])));routeMapInstance.fitBounds(bounds,{padding:[35,35],maxZoom:15})}
+}
+function initializeRouteMap(){
+  const node=document.querySelector('#route-real-map');if(!node||!window.L)return;
+  routeMapInstance=L.map(node,{scrollWheelZoom:false}).setView(routeOrigin||townCenters[town],14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(routeMapInstance);
+  routeMapLayers=L.layerGroup().addTo(routeMapInstance);
+  routeMapInstance.on('click',event=>{
+    if(routeMapMode==='origin'){routeOrigin=[event.latlng.lat,event.latlng.lng];routeOriginLabel='Punto marcado en el mapa';routeResult=null;render()}
+    else{routeReportPoint=[event.latlng.lat,event.latlng.lng];const hint=document.querySelector('#route-map-hint'),summary=document.querySelector('#route-point-summary'),button=document.querySelector('#route-report-form [type="submit"]');if(hint)hint.textContent='Peligro marcado en '+routeReportPoint[0].toFixed(5)+', '+routeReportPoint[1].toFixed(5);if(summary)summary.textContent='Ubicación seleccionada · '+routeReportPoint[0].toFixed(5)+', '+routeReportPoint[1].toFixed(5);if(button)button.disabled=false;L.circleMarker(routeReportPoint,{radius:10,color:'#fff',weight:3,fillColor:'#d9363e',fillOpacity:1}).addTo(routeMapLayers)}
+  });
+  paintRouteLayers();calculateRoutes();
+}
 async function compressRoutePhoto(file){
   if(!file)return null;
   if(!/^image\/(jpeg|png|webp)$/.test(file.type))throw Error('Elige una foto JPG, PNG o WebP.');
@@ -301,19 +294,19 @@ async function submitRoadReport(form){
   button.disabled=true;status.textContent='Preparando el reporte…';
   try{
     const data=new FormData(form),file=data.get('photo'),photoFile=file&&file.size?file:null;
-    const report={town,street:String(data.get('street')),hazard:String(data.get('hazard')),severity:String(data.get('severity')||'medium'),impact:String(data.get('impact')||'blocked'),note:String(data.get('note')||'').trim(),photo:await compressRoutePhoto(photoFile)};
-    if(!routeGraph().edges.some(edge=>edge.id===report.street)||!Object.hasOwn(hazardLabels,report.hazard)||!['low','medium','high'].includes(report.severity)||!['blocked','partial','passable'].includes(report.impact))throw Error('Selecciona un tramo y una situación válidos.');
+    const report={town,street:'Punto marcado en el mapa',latitude:routeReportPoint?.[0],longitude:routeReportPoint?.[1],hazard:String(data.get('hazard')),severity:String(data.get('severity')||'medium'),impact:String(data.get('impact')||'blocked'),note:String(data.get('note')||'').trim(),photo:await compressRoutePhoto(photoFile)};
+    if(!routeReportPoint||!Number.isFinite(report.latitude)||!Number.isFinite(report.longitude)||!Object.hasOwn(hazardLabels,report.hazard)||!['low','medium','high'].includes(report.severity)||!['blocked','partial','passable'].includes(report.impact))throw Error('Marca en el mapa el punto del reporte y selecciona una situación válida.');
     if(roadMode==='compartido'){
       const response=await fetch('/api/routes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(report)});
       if(!response.ok)throw Error(response.status===413?'La foto es demasiado grande. Prueba con otra imagen.':'No se pudo guardar el reporte compartido. Inténtalo de nuevo.');
       const result=await response.json();roadReports=result.reports||roadReports;roadBlocked=result.blocked||roadBlocked;roadMode='compartido';
     }else{
-      report.created=new Date().toISOString();report.id='local-'+Date.now();
+      report.created=new Date().toISOString();report.id='local-'+Date.now();report.lat=report.latitude;report.lon=report.longitude;
       const updated=[report,...localRoadReports()];
       try{localStorage.setItem('sicep.route-reports.v1',JSON.stringify(updated))}catch{throw Error('No hay espacio local para guardar la foto. Prueba sin foto.')}
       roadReports=updated;roadBlocked=[...new Set(updated.filter(r=>r.impact==='blocked').map(r=>r.town+':'+r.street))];
     }
-    render();
+    routeReportPoint=null;render();
   }catch(error){button.disabled=false;status.textContent=error.message||'No se pudo enviar el reporte.'}
 }
 
@@ -382,13 +375,13 @@ function paintBulletins(){
   }
   if(bulletinData && !bulletinData.items.length)list.append('Sin coincidencias en la portada consultada. ');
 }
-function render(){let [page,id]=(location.hash.slice(1)||'inicio').split('/');document.querySelector('#nav').innerHTML=Object.entries(labels).map(([k,v])=>'<a class="'+(k===(page==='detalle'?'refugios':page)?'on':'')+'" href="#'+k+'">'+icon(k)+v+'</a>').join('');let content;
+function render(){if(routeMapInstance){routeMapInstance.remove();routeMapInstance=null;routeMapLayers=null}let [page,id]=(location.hash.slice(1)||'inicio').split('/');document.querySelector('#nav').innerHTML=Object.entries(labels).map(([k,v])=>'<a class="'+(k===(page==='detalle'?'refugios':page)?'on':'')+'" href="#'+k+'">'+icon(k)+v+'</a>').join('');let content;
 switch(page){case 'refugios':content=shelters();break;case 'detalle':content=detail(Number(id));break;case 'coord':town=1;content=coordination();break;case 'avisos':content=back()+'<h1>Avisos municipales</h1>'+select()+'<section class="card notice"><small>'+alerts[town][2]+'</small><h2>'+alerts[town][0]+'</h2><p>'+alerts[town][1]+'</p><p>Consulta la información oficial vigente en el portal estatal.</p>'+source+'</section><a class="link" href="#refugios">Ver refugios de '+towns[town]+'</a>';break;case 'contactos':content=contacts();break;case 'mapa':content=riskMap();break;case 'rutas':content=routesPage();break;case 'planes':content=plans(id);break;case 'guia':content=preparation();break;default:page='inicio';content=home()}
 if(page==='inicio')content+=bulletinPanel();
 if(page==='avisos')content+=bulletinPanel();
 if(page!=='inicio')content+=actionPanel(page);
-app.innerHTML=page==='inicio'?content:'<div class="sheet">'+content+'</div>';paintBulletins();document.title=(labels[page]||'Protección civil')+' · SICEP Puebla';if(page==='rutas'&&roadMode==='cargando')refreshRoadReports()}
-app.addEventListener('change',e=>{if(e.target.id==='town'){town=Number(e.target.value);selectedZone=towns[town];zoom=1;routeDestination=null;routeOrigin=0;routeSelectedStreet=null;demoHazard=null;render()}if(e.target.id==='route-destination'){routeDestination=Number(e.target.value);render()}if(e.target.id==='route-origin'){routeOrigin=Number(e.target.value);render()}});
+app.innerHTML=page==='inicio'?content:'<div class="sheet">'+content+'</div>';paintBulletins();document.title=(labels[page]||'Protección civil')+' · SICEP Puebla';if(page==='rutas'){initializeRouteMap();if(roadMode==='cargando')refreshRoadReports()}}
+app.addEventListener('change',e=>{if(e.target.id==='town'){town=Number(e.target.value);selectedZone=towns[town];zoom=1;routeDestination=null;routeOrigin=[...townCenters[town]];routeOriginLabel='Centro del municipio · aproximado';routeReportPoint=null;demoHazard=null;render()}if(e.target.id==='route-destination'){routeDestination=Number(e.target.value);render()}});
 app.addEventListener('change',e=>{
   if(e.target.dataset.prep===undefined)return;
   const index=Number(e.target.dataset.prep);
@@ -400,8 +393,7 @@ app.addEventListener('change',e=>{
   catch{status.textContent+=' · El navegador no pudo guardar el avance.'}
 });
 app.addEventListener('submit',e=>{e.preventDefault();if(e.target.id==='route-report-form'){submitRoadReport(e.target);return}update(1,Number(new FormData(e.target).get('count')))});
-app.addEventListener('click',e=>{const edge=e.target.closest('[data-street]');if(edge){routeSelectedStreet=edge.dataset.street;render();document.querySelector('#route-report-form')?.scrollIntoView({behavior:'smooth',block:'center'});return}let b=e.target.closest('button');if(!b)return;if(b.dataset.refreshRoutes!==undefined)refreshRoadReports();if(b.dataset.scenario){if(b.dataset.scenario==='clear')demoHazard=null;else if(location.hash==='#rutas'){const graph=routeGraph(),active=[...roadReports.filter(r=>Number(r.town)===town),...(demoHazard?[demoHazard]:[])],risks=new Map(active.filter(r=>r.impact==='blocked').map(r=>[r.street,{blocked:true}])),goal=town===0?(routeDestination===1?11:15):15,base=shortestRoute(graph,routeOrigin,goal,false,risks);demoHazard=base?.edges.length?{id:'demo-'+Date.now(),town,street:base.edges[0].id,hazard:'derrumbe',severity:'high',impact:'blocked',note:'Escenario sintético de demostración',created:new Date().toISOString()}:null}render()}if(b.dataset.layer){hazardLayer=b.dataset.layer;render()}if(b.dataset.zone){selectedZone=b.dataset.zone;render()}if(b.dataset.mode){mode=b.dataset.mode;render()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
-app.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const edge=e.target.closest('[data-street]');if(edge){e.preventDefault();routeSelectedStreet=edge.dataset.street;render()}});
+app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.refreshRoutes!==undefined)refreshRoadReports();if(b.dataset.routeMode){routeMapMode=b.dataset.routeMode;render()}if(b.hasAttribute('data-route-location')){if(!navigator.geolocation){alert('Este navegador no permite compartir ubicación.');return}navigator.geolocation.getCurrentPosition(position=>{routeOrigin=[position.coords.latitude,position.coords.longitude];routeOriginLabel='Mi ubicación actual';routeMapMode='origin';render()},()=>alert('No se pudo obtener la ubicación. Puedes marcar la salida tocando el mapa.'),{enableHighAccuracy:true,timeout:10000,maximumAge:60000})}if(b.dataset.scenario){if(b.dataset.scenario==='clear')demoHazard=null;else{const route=routeResult?.routes?.[0];if(route?.geometry?.coordinates?.length){const point=route.geometry.coordinates[Math.floor(route.geometry.coordinates.length*.55)];demoHazard={id:'demo-'+Date.now(),town,latitude:point[1],longitude:point[0],lat:point[1],lon:point[0],hazard:'derrumbe',severity:'high',impact:'blocked',note:'Escenario sintético de demostración'}}else{alert('Espera a que se calcule una ruta para probar el reporte.');return}}render()}if(b.dataset.layer){hazardLayer=b.dataset.layer;render()}if(b.dataset.zone){selectedZone=b.dataset.zone;render()}if(b.dataset.mode){mode=b.dataset.mode;render()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
 window.addEventListener('hashchange',()=>{render();scrollTo(0,0)});render();
 
 sync();if(hosted)setInterval(()=>{if(!document.hidden){sync();if(location.hash==='#rutas')refreshRoadReports()}},15000);
