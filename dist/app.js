@@ -1,4 +1,4 @@
-const paths={inicio:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',avisos:'M5 17h14l-2-4V9a5 5 0 0 0-10 0v4z M10 20h4',refugios:'M12 22s8-9 8-14a8 8 0 1 0-16 0c0 5 8 14 8 14z M15 9a3 3 0 1 1-6 0 3 3 0 0 1 6 0',contactos:'M5 3h4l2 5-3 2q2 5 6 6l2-3 5 2v4q0 3-4 2Q4 18 3 6z',guia:'M3 5q5-2 9 1 4-3 9-1v14q-5-2-9 1-4-3-9-1z M12 6v14',coord:'M4 5h16v16H4z M8 9h8 M8 13h8 M8 17h5',rutas:'M4 20 9 5l6 14 5-12 M7 12h5 M14 15h5'};
+const paths={inicio:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',avisos:'M5 17h14l-2-4V9a5 5 0 0 0-10 0v4z M10 20h4',refugios:'M12 22s8-9 8-14a8 8 0 1 0-16 0c0 5 8 14 8 14z M15 9a3 3 0 1 1-6 0 3 3 0 0 1 6 0',contactos:'M5 3h4l2 5-3 2q2 5 6 6l2-3 5 2v4q0 3-4 2Q4 18 3 6z',policia:'M12 2 20 5v6c0 5-3.5 8.7-8 11-4.5-2.3-8-6-8-11V5z M12 6v11',bomberos:'M7 22h10V11H7z M9 11V5h6v6 M12 2v3 M7 15H4v4h3 M17 15h3v4h-3',ambulancia:'M2 7h12v11H2z M14 11h4l4 4v3h-8z M6 18a2 2 0 1 0 4 0 M17 18a2 2 0 1 0 4 0 M6 12h4 M8 10v4',guia:'M3 5q5-2 9 1 4-3 9-1v14q-5-2-9 1-4-3-9-1z M12 6v14',coord:'M4 5h16v16H4z M8 9h8 M8 13h8 M8 17h5',rutas:'M4 20 9 5l6 14 5-12 M7 12h5 M14 15h5'};
 paths.mapa=paths.refugios;paths.planes=paths.guia;
 const icon=k=>'<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="'+paths[k]+'"/></svg>';
 const labels={inicio:'Inicio',avisos:'Avisos',mapa:'Mi ciudad',rutas:'Rutas',refugios:'Refugios',guia:'Mi plan',contactos:'Contactos'};
@@ -169,12 +169,16 @@ function plans(id){
   return `${back()}<h1>Planes de Protección Civil</h1><div class="tiles">${planTopics.map(([key,symbol,title])=>`<a class="tile" href="#planes/${key}"><span class="icon" aria-hidden="true">${symbol}</span><b>${title}</b><span class="chev" aria-hidden="true">›</span></a>`).join('')}</div>`;
 }
 const emergencyNumbers=[
-  ['911','Emergencias y auxilio','Policía, bomberos y atención médica urgente.'],
-  ['089','Denuncia anónima','Reportes anónimos de posibles delitos.'],
-  ['800 581 44 44','Centro de Atención Telefónica de Puebla','Atención telefónica estatal.']
+  {icon:'policia',kind:'police',title:'Policía',service:'Seguridad y auxilio',number:'911',description:'Emergencias, delitos en curso y solicitud de apoyo policial.'},
+  {icon:'bomberos',kind:'fire',title:'Bomberos',service:'Incendios y rescate',number:'911',description:'Incendios, fugas, derrumbes y operaciones de rescate.'},
+  {icon:'ambulancia',kind:'medical',title:'Ambulancia',service:'Atención médica urgente',number:'911',description:'Urgencias médicas y solicitud de ambulancia.'}
+];
+const supportContacts=[
+  {number:'089',tel:'089',title:'Denuncia anónima',description:'Para denunciar de forma anónima hechos que requieren investigación y no son una emergencia en curso.'},
+  {number:'(222) 232 8080 · 8081 · 8082',tel:'2222328080',title:'SUMA Puebla',description:'Teléfonos de contacto publicados por los Servicios de Salud del Estado de Puebla.'}
 ];
 function contacts(){
-  return `${back()}<h1>Números de emergencia y atención</h1><div class="stack">${emergencyNumbers.map(([number,title,description])=>`<section class="card"><h2>${title}</h2><p>${description}</p><a class="btn" href="tel:${number.replaceAll(' ','')}">${icon('contactos')} Llamar al ${number}</a></section>`).join('')}</div><p class="muted">Fuente: Secretaría de Salud del Estado de Puebla.</p>`;
+  return `${back()}<div class="contacts-heading"><small class="kicker">Atención en Puebla</small><h1>Contactos de emergencia</h1><p>El 911 es la línea única: desde ahí canalizan Policía, Bomberos y ambulancias.</p></div><div class="contact-grid">${emergencyNumbers.map(item=>`<article class="contact-card ${item.kind}"><span class="contact-icon">${icon(item.icon)}</span><h2>${item.title}</h2><p class="contact-service">${item.service}</p><a class="contact-number" href="tel:${item.number}">${item.number}</a><p class="contact-description">${item.description}</p><a class="btn contact-call" href="tel:${item.number}">${icon('contactos')} Llamar al ${item.number}</a></article>`).join('')}</div><section class="contact-additional"><h2>Otros contactos</h2><div class="contact-additional-grid">${supportContacts.map(item=>`<article class="contact-extra"><div><h3>${item.title}</h3><p>${item.description}</p></div><a href="tel:${item.tel}">${item.number}</a></article>`).join('')}</div></section><p class="muted contact-source">Emergencias y auxilio: <a href="https://ss.puebla.gob.mx/emergencias" target="_blank" rel="noopener">Servicios de Salud del Estado de Puebla</a>. El 911 coordina la atención de urgencias.</p>`;
 }
 function riskMap(){
   const monitors=[
