@@ -1,4 +1,4 @@
-const shellCache = 'sicep-shell-v1';
+const shellCache = 'sicep-shell-v2';
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {

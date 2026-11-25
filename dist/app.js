@@ -140,7 +140,44 @@ async function refreshRoadReports(){
 }
 let caseId=1,caseDirectory=[],caseSyncVersion=0,replayingReports=false;
 let coordinationSection='';
+const operatorSessionKey='sicep.operator-session.v1';
+const operatorSnapshotKey='sicep.operator-snapshot.v1';
 let operationalToken='',operationalRole='',operatorKey='',institutionalRequired=false;
+try{
+  const session=JSON.parse(sessionStorage.getItem(operatorSessionKey));
+  if(session?.token&&['brigada','coordinacion'].includes(session.role)&&session.key){
+    operationalToken=session.token;
+    operationalRole=session.role;
+    operatorKey=session.key;
+    institutionalRequired=true;
+    const snapshot=readOperatorSnapshot();
+    if(snapshot){
+      caseId=snapshot.data.id;
+      incident=snapshot.data;
+      revision=incident.updated;
+      caseDirectory=snapshot.entries;
+    }
+  }
+}catch{}
+function readOperatorSnapshot(){
+  try{
+    const snapshot=JSON.parse(sessionStorage.getItem(operatorSnapshotKey));
+    return operationalRole==='brigada'&&snapshot?.key===operatorKey?snapshot:null;
+  }catch{return null}
+}
+function saveOperatorSnapshot(data,entries){
+  if(operationalRole!=='brigada')return;
+  try{sessionStorage.setItem(operatorSnapshotKey,JSON.stringify({key:operatorKey,data,entries}))}catch{}
+}
+function clearOperatorSession(){
+  operationalToken='';
+  operationalRole='';
+  operatorKey='';
+  try{
+    sessionStorage.removeItem(operatorSessionKey);
+    sessionStorage.removeItem(operatorSnapshotKey);
+  }catch{}
+}
 function operationalFetch(url,options={}){
   const headers=new Headers(options.headers);
   if(operationalToken)headers.set('Authorization','Bearer '+operationalToken);
@@ -166,12 +203,15 @@ function cacheCase(data){
 async function replayReports(){
   if(replayingReports)return;
   replayingReports=true;
+  const queueOperator=operatorKey;
   try{
     for(const item of readCaseStorage(reportQueueKey,[])){
-      if((item.operatorKey||'')!==operatorKey)continue;
+      if(queueOperator!==operatorKey)break;
+      if((item.operatorKey||'')!==queueOperator)continue;
       const response=await operationalFetch(caseEndpoint(item.caseId),{cache:'no-store'});
       if(!response.ok)continue;
       const data=await response.json();
+      if(queueOperator!==operatorKey)break;
       const saved=await operationalFetch(caseEndpoint(item.caseId),{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({stage:3,count:data.count,revision:data.updated,attention:item.attention}),
@@ -194,6 +234,7 @@ async function sync(){
     if(directory.status===401){
       if(version!==caseSyncVersion)return;
       institutionalRequired=true;
+      clearOperatorSession();
       incident=null;
       caseDirectory=[];
       render();
@@ -201,7 +242,10 @@ async function sync(){
     }
     if(response.status===403&&directory.ok&&operationalRole==='brigada'){
       if(version!==caseSyncVersion)return;
-      caseDirectory=await directory.json();
+      const entries=await directory.json();
+      if(version!==caseSyncVersion)return;
+      caseDirectory=entries;
+      try{sessionStorage.removeItem(operatorSnapshotKey)}catch{}
       if(caseDirectory.length){selectCase(caseDirectory[0].id);return}
       incident=null;connection='Registro municipal compartido';render();return;
     }
@@ -211,6 +255,7 @@ async function sync(){
     const changed=revision!==data.updated||incident?.id!==id||
       JSON.stringify(caseDirectory)!==JSON.stringify(entries)||connection!=='Registro municipal compartido';
     caseDirectory=entries;
+    if(institutionalRequired)saveOperatorSnapshot(data,entries);
     try{if(!institutionalRequired){cacheCase(data);localStorage.setItem('sicep.case-directory.v1',JSON.stringify(entries))}}catch{}
     revision=data.updated;incident=data;connection='Registro municipal compartido';
     if(changed)render();
@@ -218,7 +263,7 @@ async function sync(){
     if(version!==caseSyncVersion)return;
     if(!institutionalRequired){
       caseDirectory=readCaseStorage('sicep.case-directory.v1',[]);
-      incident=institutionalRequired?null:(readCaseStorage(caseCacheKey,{})[id]||null);
+      incident=readCaseStorage(caseCacheKey,{})[id]||null;
     }
     revision=incident?.updated||'';
     if(connection!=='Sin conexión · copia del último expediente recibido'){connection='Sin conexión · copia del último expediente recibido';render()}
@@ -230,14 +275,27 @@ function selectCase(id){
   if(id===caseId)return;
   caseId=id;
   coordinationSection='';
-  incident=readCaseStorage(caseCacheKey,{})[id]||null;
+  const snapshot=readOperatorSnapshot();
+  incident=institutionalRequired?(snapshot?.data.id===id?snapshot.data:null):(readCaseStorage(caseCacheKey,{})[id]||null);
   revision=incident?.updated||'';
   coordEditing=false;
   render();
   sync();
 }
-function saveLocalExercise(stage,count,details,assignment,radio,attention){
+function saveLocalExercise(stage,count,details,assignment,radio,attention,operation){
   const now=new Date().toISOString(),old=incident||{},nextDetails={...(old.details||{}),...(details||{})};
+  if(operation?.type==='resources'){
+    const {capacity,open,access,available}=operation;
+    nextDetails.resources={capacity,open,access,available,updated:now};
+  }
+  if(stage===2){
+    const resources=nextDetails.resources;
+    if(!['Verificado','Verificado en el ejercicio'].includes(nextDetails.verification)||
+      !resources?.updated||!resources.open||!resources.access||resources.capacity<old.count||
+      !resources.available.includes(assignment?.brigade)){
+      throw Error('Verifica el reporte y confirma los recursos antes de asignar.');
+    }
+  }
   if(stage===2)Object.assign(nextDetails,{shelter:assignment?.shelter||'Auditorio Municipal',brigade:assignment?.brigade||'Brigada Atempan 01',taskStatus:'Asignada'});
   if(stage===3)nextDetails.taskStatus='Recibida por la brigada';
   if(radio){
@@ -260,8 +318,11 @@ function saveLocalExercise(stage,count,details,assignment,radio,attention){
   connection='Registro local · datos guardados en este navegador';render();
 }
 async function update(stage,count,details=null,assignment=null,radio=null,attention=null,operation=null){
-  if(!hosted){saveLocalExercise(stage,count,details,assignment,radio,attention);return}
-  const id=caseId;
+  if(!hosted){
+    try{saveLocalExercise(stage,count,details,assignment,radio,attention,operation)}catch(error){alert(error.message)}
+    return;
+  }
+  const id=caseId,submissionOperator=operatorKey;
   ++caseSyncVersion;
   try{
     const r=await operationalFetch(caseEndpoint(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stage,count,revision,details,assignment,radio,attention,operation})});
@@ -272,6 +333,8 @@ async function update(stage,count,details=null,assignment=null,radio=null,attent
       return;
     }
     const saved=await r.json();
+    if(submissionOperator!==operatorKey)return;
+    if(institutionalRequired&&caseId===id)saveOperatorSnapshot(saved,caseDirectory);
     try{if(!institutionalRequired)cacheCase(saved)}catch{}
     if(caseId===id){
       if(profile==='coordinacion'&&(assignment||details?.verification==='Verificado'))coordinationSection='';
@@ -279,10 +342,10 @@ async function update(stage,count,details=null,assignment=null,radio=null,attent
     }
     await sync();
   }catch(error){
-    if(error instanceof TypeError&&attention?.fromBrigade){
+    if(error instanceof TypeError&&attention?.fromBrigade&&submissionOperator===operatorKey){
       try{
         const queue=readCaseStorage(reportQueueKey,[]);
-        localStorage.setItem(reportQueueKey,JSON.stringify([...queue,{caseId:id,attention,operatorKey}]));
+        localStorage.setItem(reportQueueKey,JSON.stringify([...queue,{caseId:id,attention,operatorKey:submissionOperator}]));
         connection='Sin conexión · avance guardado en este dispositivo';
         render();
       }catch{alert('No se pudo guardar el avance en este navegador.')}
@@ -1162,7 +1225,7 @@ function refreshShelterResults(){
   document.querySelector('#shelter-results').innerHTML=shelterResults();
 }
 const source='<a class="link" target="_blank" rel="noopener" href="https://proteccioncivil.puebla.gob.mx/">Protección Civil del Estado de Puebla</a>';
-function caseDetails(){return{locality:'Atempan',reportedAt:incident?.updated||new Date().toISOString(),source:'Protección Civil municipal',impact:'Inundación; familias requieren alojamiento temporal.',need:'Alojamiento temporal',verification:incident?.stage?'Verificado':'Pendiente de verificar',...(incident?.details||{}),verification:incident?.details?.verification==='Pendiente de verificar'||!incident?.stage?'Pendiente de verificar':'Verificado'}}
+function caseDetails(){return{locality:'Atempan',reportedAt:incident?.updated||new Date().toISOString(),source:'Protección Civil municipal',impact:'Inundación; familias requieren alojamiento temporal.',need:'Alojamiento temporal',verification:incident?.stage>=2?'Verificado':'Pendiente de verificar',...(incident?.details||{})}}
 function caseForm(details,count){const localDate=new Date(new Date(details.reportedAt).getTime()-new Date(details.reportedAt).getTimezoneOffset()*60000).toISOString().slice(0,16);return `<form id="report" class="case-form"><h2>${incident?.stage?'Actualizar datos del incidente':'Registrar incidente'}</h2><div class="case-form-grid"><label>Localidad<input name="locality" value="${escapeHTML(details.locality)}" maxlength="100" required></label><label>Fecha y hora del reporte<input type="datetime-local" name="reportedAt" value="${localDate}" required></label><label>Origen del reporte<select name="source">${['Protección Civil municipal','Llamada al 911','Radio','Reporte ciudadano'].map(x=>`<option ${details.source===x?'selected':''}>${x}</option>`).join('')}</select></label><label>Necesidad principal<select name="need">${['Alojamiento temporal','Evacuación','Atención médica','Alimentos y agua','Otro'].map(x=>`<option ${details.need===x?'selected':''}>${x}</option>`).join('')}</select></label><label class="case-form-wide">Afectación reportada<textarea name="impact" rows="3" maxlength="300" required>${escapeHTML(details.impact)}</textarea></label><label>Personas estimadas<input type="number" name="count" min="1" max="9999" value="${count}" required></label><label>Verificación<select name="verification"><option ${details.verification==='Pendiente de verificar'?'selected':''}>Pendiente de verificar</option><option ${details.verification==='Verificado'?'selected':''}>Verificado</option></select></label></div><div class="case-actions"><button type="submit">${incident?.stage?'Guardar cambios':'Registrar y abrir expediente'}</button>${incident?.stage?'<button type="button" class="route-refresh" data-case-cancel>Cancelar</button>':''}</div></form>`}
 const attentionStates=['Pendiente','En atención','Parcial','Atendida'];
 const brigadeNames=['Brigada Atempan 01','Brigada Atempan 02'];
@@ -1196,7 +1259,7 @@ function resourcePanel(resources,stage){
   if(!stage)return '';
   return `<section class="card case-form"><h2>Recursos del expediente</h2>
     <p>Auditorio Municipal · capacidad nominal de 500 personas.</p>
-    <p>${resources.updated?`Verificación · ${caseTime(resources.updated)} · ${resources.capacity} cupos · ${resources.open?'abierto':'cerrado'} · ${resources.access?'acceso transitable':'acceso sin confirmar o bloqueado'}`:'Referencia inicial · 40 cupos. Actualiza la disponibilidad antes de asignar.'}</p>
+    <p>${resources.updated?`Verificación · ${caseTime(resources.updated)} · ${resources.capacity} cupos · ${resources.open?'abierto':'cerrado'} · ${resources.access?'acceso transitable':'acceso sin confirmar o bloqueado'}`:'Disponibilidad pendiente de confirmar.'}</p>
     ${stage===1?`<form id="verify-resources" class="case-form">
       <label>Cupo confirmado<input type="number" name="capacity" min="0" max="500" value="${resources.capacity}" required></label>
       <label><input type="checkbox" name="open" ${resources.open?'checked':''}> Refugio abierto</label>
@@ -1222,7 +1285,7 @@ function attentionPanel(details,stage,field=false){
 }
 function coordination(){
   const stage=incident?.stage||0,details=caseDetails();
-  const resources=details.resources||{capacity:40,open:true,access:true,available:brigadeNames};
+  const resources=details.resources||{capacity:0,open:false,access:false,available:[]};
   const children=caseDirectory.filter(row=>row.parentId===caseId);
   const openChildren=children.filter(row=>!row.closed).length;
   const title=incident?.id?caseFolio():'Expediente municipal';
@@ -1263,7 +1326,8 @@ function coordination(){
   if(active==='asignacion'){
     const recommended=details.need==='Atención médica'?brigadeNames[1]:brigadeNames[0];
     const missing=[
-      ...(details.verification==='Pendiente de verificar'?['Verificar el reporte en Incidente.']:[]),
+      ...(!['Verificado','Verificado en el ejercicio'].includes(details.verification)?['Verificar el reporte en Incidente.']:[]),
+      ...(!resources.updated?['Guardar la verificación de recursos.']:[]),
       ...(!resources.open?['Confirmar que el refugio esté abierto.']:[]),
       ...(!resources.access?['Confirmar que el acceso sea transitable.']:[]),
       ...(resources.capacity<incident.count?[`Confirmar al menos ${incident.count} cupos.`]:[]),
@@ -1657,6 +1721,7 @@ app.addEventListener('submit',async e=>{e.preventDefault();
       operationalToken=token;
       operationalRole=account.role;
       operatorKey=JSON.stringify([account.role,account.brigade||'',account.name]);
+      try{sessionStorage.setItem(operatorSessionKey,JSON.stringify({token,role:account.role,key:operatorKey}))}catch{}
       setProfile(account.role);
       location.hash=account.role==='brigada'?'#brigada':'#coord';
       await sync();
@@ -1685,7 +1750,8 @@ app.addEventListener('click',async event=>{
   const button=event.target.closest('button');
   if(!button)return;
   if(button.hasAttribute('data-operator-signout')){
-    operationalToken='';operationalRole='';operatorKey='';incident=null;caseDirectory=[];caseId=1;
+    clearOperatorSession();
+    incident=null;caseDirectory=[];caseId=1;revision='';
     ++caseSyncVersion;
     render();
     return;

@@ -103,9 +103,9 @@ async function state(request, db, configuredAccounts) {
     if(operation&&!['resources','validate','close-need','close-case'].includes(operation.type))return new Response(null,{status:400});
     if(stage===2){
       const resources=details.resources;
-      if(details.verification==='Pendiente de verificar')
+      if(!['Verificado','Verificado en el ejercicio'].includes(details.verification))
         return Response.json({error:'Verifica la información del incidente antes de asignar.'},{status:400});
-      if(resources?(!resources.open||!resources.access||resources.capacity<current.count||!resources.available.includes(body.assignment?.brigade)):current.count>40)
+      if(!resources?.updated||!resources.open||!resources.access||resources.capacity<current.count||!resources.available.includes(body.assignment?.brigade))
         return Response.json({error:'No hay recursos confirmados suficientes.'},{status:400});
     }
     if(stage===2){const a=body.assignment||{};if(a.shelter!=='Auditorio Municipal'||!['Brigada Atempan 01','Brigada Atempan 02'].includes(a.brigade))return Response.json({error:'Asignación inválida'},{status:400});details={...details,shelter:a.shelter,brigade:a.brigade,taskStatus:'Asignada'}}
