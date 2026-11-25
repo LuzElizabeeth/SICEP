@@ -1,4 +1,5 @@
 const paths={inicio:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',avisos:'M5 17h14l-2-4V9a5 5 0 0 0-10 0v4z M10 20h4',refugios:'M12 22s8-9 8-14a8 8 0 1 0-16 0c0 5 8 14 8 14z M15 9a3 3 0 1 1-6 0 3 3 0 0 1 6 0',contactos:'M5 3h4l2 5-3 2q2 5 6 6l2-3 5 2v4q0 3-4 2Q4 18 3 6z',guia:'M3 5q5-2 9 1 4-3 9-1v14q-5-2-9 1-4-3-9-1z M12 6v14',coord:'M4 5h16v16H4z M8 9h8 M8 13h8 M8 17h5'};
+paths.mapa=paths.refugios;paths.planes=paths.guia;
 const icon=k=>'<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="'+paths[k]+'"/></svg>';
 const labels={inicio:'Inicio',avisos:'Avisos',refugios:'Refugios',guia:'Mi plan',contactos:'Contactos'};
 const towns=['San Pedro Cholula','Atempan'];
@@ -60,9 +61,39 @@ function preparation(){
   ${checklist.map((item,i)=>`<label class="check"><input type="checkbox" data-prep="${i}" ${prepared.includes(i)?'checked':''}> ${item}</label>`).join('')}</section>
   <a class="link" href="#refugios">Consultar refugios de ${towns[town]}</a>`;
 }
+const planTopics = [
+  ['lluvias','⛈','Emergencias hidrometeorológicas'],
+  ['sismos','⌂','Plan operativo de sismos'],
+  ['incendios','♨','Contingencias de incendios'],
+  ['invierno','❄','Emergencias de temporada invernal'],
+  ['volcan','△','Plan Popocatépetl'],
+  ['peregrinaciones','♧','Protección y seguridad en peregrinaciones'],
+  ['pirotecnia','✧','Programa especial de pirotecnia']
+];
+function plans(id){
+  const plan = planTopics.find(topic=>topic[0]===id);
+  if(plan)return `${back('planes','Planes de Protección Civil')}<span class="icon" aria-hidden="true">${plan[1]}</span><h1>${plan[2]}</h1><section class="card"><p>Documento oficial pendiente de incorporar.</p><a class="link" href="#guia">Abrir mi plan de emergencia</a></section>`;
+  return `${back()}<h1>Planes de Protección Civil</h1><div class="tiles">${planTopics.map(([key,symbol,title])=>`<a class="tile" href="#planes/${key}"><span class="icon" aria-hidden="true">${symbol}</span><b>${title}</b><span class="chev" aria-hidden="true">›</span></a>`).join('')}</div>`;
+}
+const emergencyNumbers=[
+  ['911','Emergencias y auxilio','Policía, bomberos y atención médica urgente.'],
+  ['089','Denuncia anónima','Reportes anónimos de posibles delitos.'],
+  ['800 581 44 44','Centro de Atención Telefónica de Puebla','Atención telefónica estatal.']
+];
+function contacts(){
+  return `${back()}<h1>Números de emergencia y atención</h1><div class="stack">${emergencyNumbers.map(([number,title,description])=>`<section class="card"><h2>${title}</h2><p>${description}</p><a class="btn" href="tel:${number.replaceAll(' ','')}">${icon('contactos')} Llamar al ${number}</a></section>`).join('')}</div><p class="muted">Fuente: Secretaría de Salud del Estado de Puebla.</p>`;
+}
+function riskMap(){
+  const boxes=['-98.34,19.03,-98.27,19.09','-97.49,19.79,-97.40,19.88'];
+  const [west,south,east,north]=boxes[town].split(',').map(Number);
+  const bounds=encodeURIComponent(boxes[town]);
+  const marker=encodeURIComponent(`${(south+north)/2},${(west+east)/2}`);
+  return `${back()}<h1>Mapa municipal</h1>${select()}<section class="card map-card"><iframe title="Mapa de ${towns[town]} en OpenStreetMap" src="https://www.openstreetmap.org/export/embed.html?bbox=${bounds}&amp;layer=mapnik&amp;marker=${marker}"></iframe><p class="muted">Marcador de referencia del área mostrada. Los refugios y avisos de demostración se consultan por municipio.</p></section><div class="tiles">${tile('avisos','Ver avisos de '+towns[town],alerts[town][0])}${tile('refugios','Ver refugios de '+towns[town],'Abrir el directorio municipal')}</div>`;
+}
+
 function actionPanel(){
   return `<section class="action-panel"><div class="action-heading"><h2>Acciones rápidas</h2><a class="btn" href="tel:911">${icon('contactos')} Llamar al 911</a></div>
-  <div class="tiles">${tile('avisos','Consultar avisos','Boletines oficiales y escenario municipal')}${tile('refugios','Encontrar un refugio','Ubicación y disponibilidad de demostración')}${tile('guia','Preparar a mi familia','Lista de tareas y avance personal')}</div></section>`;
+  <div class="tiles">${tile('avisos','Consultar avisos','Boletines oficiales y escenario municipal')}${tile('refugios','Encontrar un refugio','Ubicación y disponibilidad de demostración')}${tile('mapa','Explorar mapa municipal','Consulta territorial')}${tile('planes','Planes de Protección Civil','Catálogo por tipo de emergencia')}${tile('contactos','Números de atención','Emergencias y denuncia anónima')}${tile('guia','Preparar a mi familia','Lista de tareas y avance personal')}</div></section>`;
 }
 
 function home(){
@@ -104,9 +135,9 @@ function paintBulletins(){
   if(bulletinData && !bulletinData.items.length)list.append('Sin coincidencias en la portada consultada. ');
 }
 function render(){let [page,id]=(location.hash.slice(1)||'inicio').split('/');document.querySelector('#nav').innerHTML=Object.entries(labels).map(([k,v])=>'<a class="'+(k===(page==='detalle'?'refugios':page)?'on':'')+'" href="#'+k+'">'+icon(k)+v+'</a>').join('');let content;
-switch(page){case 'refugios':content=shelters();break;case 'detalle':content=detail(Number(id));break;case 'coord':town=1;content=coordination();break;case 'avisos':content=back()+'<h1>Avisos municipales</h1>'+select()+'<section class="card notice"><small>'+alerts[town][2]+'</small><h2>'+alerts[town][0]+'</h2><p>'+alerts[town][1]+'</p><p>Consulta la información oficial vigente en el portal estatal.</p>'+source+'</section><a class="link" href="#refugios">Ver refugios de '+towns[town]+'</a>';break;case 'contactos':content=back()+'<h1>Contactos de emergencia</h1><section class="card"><h2>Emergencias · 911</h2><p>Policía, bomberos y atención médica. Utiliza esta línea únicamente ante una emergencia real.</p><a class="btn" href="tel:911">'+icon('contactos')+' Llamar al 911</a></section><section class="card"><h2>Protección Civil</h2>'+source+'</section>';break;case 'guia':content=preparation();break;default:page='inicio';content=home()}
+switch(page){case 'refugios':content=shelters();break;case 'detalle':content=detail(Number(id));break;case 'coord':town=1;content=coordination();break;case 'avisos':content=back()+'<h1>Avisos municipales</h1>'+select()+'<section class="card notice"><small>'+alerts[town][2]+'</small><h2>'+alerts[town][0]+'</h2><p>'+alerts[town][1]+'</p><p>Consulta la información oficial vigente en el portal estatal.</p>'+source+'</section><a class="link" href="#refugios">Ver refugios de '+towns[town]+'</a>';break;case 'contactos':content=contacts();break;case 'mapa':content=riskMap();break;case 'planes':content=plans(id);break;case 'guia':content=preparation();break;default:page='inicio';content=home()}
 if(page==='inicio')content+=bulletinPanel();
-if(page==='avisos')content+=bulletinPanel();
+if(page==='avisos')content+=bulletinPanel()+tile('mapa','Consultar mapa municipal',towns[town]);
 app.innerHTML=page==='inicio'?content:'<div class="sheet">'+content+'</div>';paintBulletins();document.title=(labels[page]||'Protección civil')+' · SICEP Puebla'}
 app.addEventListener('change',e=>{if(e.target.id==='town'){town=Number(e.target.value);zoom=1;render()}});
 app.addEventListener('change',e=>{
