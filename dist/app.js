@@ -59,12 +59,46 @@ return back()+'<small style="display:block">Directorio de demostración</small><
 function detail(id){let p=places[id];if(!p)return shelters();town=p[2];return back('refugios','Refugios')+'<div>'+pill(p[3])+'</div><h1>'+p[0]+'</h1><div class="card"><h3>Dirección</h3><p>'+p[1]+', '+towns[town]+', Puebla.</p><h3>Acceso y capacidad</h3><p>'+p[4]+(id===2?' Cupo del ejercicio: '+(40-(incident?.stage>=2?incident.count:0))+'.':'')+'</p><h3>Última actualización</h3><p>Registro de demostración.</p></div><a class="btn" href="https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(p[1]+', '+towns[town]+', Puebla, México')+'" target="_blank" rel="noopener">Cómo llegar · Google Maps</a><p class="muted">Dirección de ejemplo. Verifica la ubicación antes de trasladarte.</p>'}
 const source='<a class="link" target="_blank" rel="noopener" href="https://proteccioncivil.puebla.gob.mx/">Protección Civil del Estado de Puebla</a>';
 function coordination(){let stage=incident?.stage||0;return back()+'<small style="display:block">Simulación municipal · Atempan</small><h1>Coordinación de brigadas</h1><p>Practica la atención de una inundación. '+connection+'.</p><div class="card">'+(!stage?'<form id="report"><h2>Registrar incidente</h2><p>Inundación en Atempan</p><label>Personas que necesitan alojamiento<input type="number" name="count" min="1" max="9999" value="35" required></label><button>Registrar y revisar propuesta</button></form>':'<small>Folio SICEP-AT-001</small><h2>Inundación en Atempan</h2><p>'+incident.count+' personas requieren alojamiento.</p>'+(stage===1?(incident.count<=40?'<h3>Propuesta · Auditorio Municipal</h3><p>El acceso está verificado y los 40 lugares del ejercicio cubren la solicitud. Los otros refugios tienen acceso bloqueado o pendiente de confirmar.</p><button data-step="2">Confirmar asignación a brigada</button>':'<p>Los 40 lugares disponibles son insuficientes. Se requiere coordinación adicional.</p>'):stage===2?'<h3>Asignación confirmada</h3><p>Brigada municipal: recibe la asignación al Auditorio Municipal para '+incident.count+' personas.</p><button data-step="3">Acusar recibo como brigada</button>':'<h3>Brigada enterada</h3><p>Acuse registrado para el Auditorio Municipal.</p>')+'<p><button class="segment" data-step="0">Reiniciar ejercicio</button></p>')+'</div>'}
+let bulletinData=null;
+function bulletinPanel(){
+  return '<section class="card" id="bulletins"><small>Gobierno del Estado de Puebla</small><h2>Boletines estatales de protección civil</h2><div id="bulletinList"></div><a class="link" href="https://www.puebla.gob.mx/index.php/noticias" target="_blank" rel="noopener">Ver portal de origen</a></section>';
+}
+function paintBulletins(){
+  const list=document.querySelector('#bulletinList');
+  if(!list)return;
+  list.replaceChildren();
+  const status=document.createElement('p');
+  status.className='muted';
+  status.textContent=bulletinData ? (bulletinData.saved?'Copia guardada · ':'Consulta del portal · ')+new Date(bulletinData.checked).toLocaleString('es-MX',{timeZone:'America/Mexico_City'})+' (hora de Puebla)' : 'Consultando fuente estatal…';
+  list.append(status);
+  for(const item of bulletinData?.items||[]){
+    const link=document.createElement('a');
+    link.className='shelterLine';link.href=item.url;link.target='_blank';link.rel='noopener';
+    link.textContent=item.published+' · '+item.title;list.append(link);
+  }
+  if(bulletinData && !bulletinData.items.length)list.append('Sin coincidencias en la portada consultada. ');
+}
 function render(){let [page,id]=(location.hash.slice(1)||'inicio').split('/');document.querySelector('#nav').innerHTML=Object.entries(labels).map(([k,v])=>'<a class="'+(k===(page==='detalle'?'refugios':page)?'on':'')+'" href="#'+k+'">'+icon(k)+v+'</a>').join('');let content;
 switch(page){case 'refugios':content=shelters();break;case 'detalle':content=detail(Number(id));break;case 'coord':town=1;content=coordination();break;case 'avisos':content=back()+'<h1>Avisos municipales</h1>'+select()+'<section class="card notice"><small>'+alerts[town][2]+'</small><h2>'+alerts[town][0]+'</h2><p>'+alerts[town][1]+'</p><p>Consulta la información oficial vigente en el portal estatal.</p>'+source+'</section><a class="link" href="#refugios">Ver refugios de '+towns[town]+'</a>';break;case 'contactos':content=back()+'<h1>Contactos de emergencia</h1><section class="card"><h2>Emergencias · 911</h2><p>Policía, bomberos y atención médica. Utiliza esta línea únicamente ante una emergencia real.</p><a class="btn" href="tel:911">'+icon('contactos')+' Llamar al 911</a></section><section class="card"><h2>Protección Civil</h2>'+source+'</section>';break;case 'guia':content=back()+'<h1>Guía de preparación</h1>'+[['Plan familiar','Acuerden un punto de encuentro y anoten los contactos de su red de apoyo.'],['Mochila de emergencia','Prepara agua, linterna, documentos y medicamentos personales.'],['Consulta de refugios','Selecciona tu municipio y revisa la dirección y el estado de cada refugio.']].map(([h,p])=>'<details class="card"><summary>'+h+'</summary><p>'+p+'</p></details>').join('')+'<a class="link" href="#refugios">Consultar refugios</a>';break;default:page='inicio';content=home()}
-app.innerHTML=page==='inicio'?content:'<div class="sheet">'+content+'</div>';document.title=(labels[page]||'Protección civil')+' · SICEP Puebla'}
+if(page==='inicio')content=content.replace('<div class="scope">',bulletinPanel()+'<div class="scope">');
+if(page==='avisos')content+=bulletinPanel();
+app.innerHTML=page==='inicio'?content:'<div class="sheet">'+content+'</div>';paintBulletins();document.title=(labels[page]||'Protección civil')+' · SICEP Puebla'}
 app.addEventListener('change',e=>{if(e.target.id==='town'){town=Number(e.target.value);zoom=1;render()}});
 app.addEventListener('submit',e=>{e.preventDefault();update(1,Number(new FormData(e.target).get('count')))});
 app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.mode){mode=b.dataset.mode;render()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
 window.addEventListener('hashchange',()=>{render();scrollTo(0,0)});render();
 
 sync();if(hosted)setInterval(()=>{if(!document.hidden)sync()},15000);
+
+const fallbackBulletins={
+  "items": [
+    {
+      "title": "Protección Civil Estatal rescata a dos alpinistas lesionadas en el Citlaltépetl",
+      "url": "https://www.puebla.gob.mx/index.php/noticias/item/25939-proteccion-civil-estatal-rescata-a-dos-alpinistas-lesionadas-en-el-citlaltepetl",
+      "published": "23 de Noviembre de 2026"
+    }
+  ],
+  "checked": "2026-11-25T00:47:57.868Z"
+};
+async function loadBulletins(){try{if(!hosted)throw Error();const r=await fetch('/api/boletines');if(!r.ok)throw Error();bulletinData=await r.json()}catch{bulletinData={...fallbackBulletins,saved:true}}paintBulletins()}
+loadBulletins();
