@@ -1303,7 +1303,7 @@ function coordination(){
     !details.attention?'La tarea fue aceptada. El avance aparecerá cuando se registre.':
     details.validation?.result==='Completa'?'El resultado está validado. Puedes cerrar la necesidad.':
     'Revisa el avance y valida el resultado.';
-  const sections=[['resumen','Incidente'],...(stage?[['asignacion','Asignación'],['seguimiento','Seguimiento'],['historial','Historial']]:[])];
+  const sections=[['resumen','Incidente'],...(stage?[['asignacion','Asignación'],['seguimiento','Seguimiento'],...(stage>=2?[['radio','Radio']]:[]),['historial','Historial']]:[])];
   const preferred=stage===1&&details.verification!=='Pendiente de verificar'?'asignacion':stage>=2?'seguimiento':'resumen';
   const active=sections.some(([key])=>key===coordinationSection)?coordinationSection:preferred;
   let content='';
@@ -1350,7 +1350,8 @@ function coordination(){
   }
   if(active==='seguimiento')content=stage<2?'<section class="card"><h3>Seguimiento</h3><p>Confirma una asignación para dar seguimiento a la tarea.</p></section>':
     stage===2?'<section class="card"><h3>Recepción pendiente</h3><p>El seguimiento se habilita cuando la brigada acepta la tarea.</p></section>':
-    attentionPanel(details,stage)+validationPanel(details,openChildren)+radioLog(details,stage);
+    attentionPanel(details,stage)+validationPanel(details,openChildren);
+  if(active==='radio')content=radioLog(details,stage);
   if(active==='historial')content=`<section class="card case-history"><h3>Movimientos del folio</h3>
     ${timeline?`<ol>${timeline}</ol>`:'<p>Aún no hay movimientos registrados.</p>'}</section>`;
   return `${back()}<h1>Coordinación municipal</h1><p class="coord-connection">${escapeHTML(connection)}</p>
@@ -1371,10 +1372,13 @@ function caseTime(value){
 
 function radioLog(details,stage,field=false){
   const messages=details.radioMessages||[];
+  const pendingReceipts=messages.filter(message=>!message.receivedAt).length;
+  const pendingLinks=messages.filter(message=>message.reference&&!message.linked).length;
   const brigade=escapeHTML(details.brigade||'Brigada Atempan 01');
   return `<section class="card case-radio" aria-labelledby="case-radio-title">
     <h2 id="case-radio-title" class="section-icon-title"><span class="icon">${icon('radio')}</span>Bitácora de radio</h2>
-    <p class="muted">Comunicaciones por radio · Folio ${caseFolio()}.</p>
+    <p class="muted">Folio ${caseFolio()} · ${pendingReceipts} sin acuse · ${pendingLinks} por vincular.</p>
+    <p>El acuse confirma la recepción. ${field?'El estado de la necesidad se registra en Reportar avance.':'Registra el estado de la necesidad en Seguimiento.'}</p>
     ${details.closedAt?'':field?'<p>Comunica los impedimentos por radio institucional si pierdes la conexión. Coordinación registra el mensaje y su acuse en este folio.</p>':stage===3&&messages.length<30?`<form id="case-radio-form">
       <label>Tipo de comunicación<select name="type"><option value="report">Reporte de brigada</option><option value="instruction">Instrucción de Coordinación</option></select></label>
       <label>Mensaje comunicado por radio<textarea name="message" rows="3" maxlength="320" required></textarea></label>
@@ -1384,8 +1388,8 @@ function radioLog(details,stage,field=false){
     ${messages.length?`<ul>${messages.map(message=>`<li>
       <div class="case-radio-meta"><strong>${message.type==='instruction'?`Coordinación municipal → ${brigade}`:`${brigade} → Coordinación municipal`}</strong>
       <span class="pill ${message.receivedAt?'':'neutral'}">${message.receivedAt?'Acuse registrado':'Pendiente de acuse'}</span></div>
-      <p>${escapeHTML(message.text)}</p>${message.reference?`<small>${message.linked?'Avance digital vinculado':'Pendiente de vincular'} · ${escapeHTML(message.reference)}</small>`:''}<small>Captura · ${caseTime(message.sentAt)} (Puebla)</small>
-      ${message.receivedAt?`<small>Acuse ${message.type==='instruction'?'de brigada':'de Coordinación'} · ${caseTime(message.receivedAt)} (Puebla)</small>`:
+      <p>${escapeHTML(message.text)}</p>${message.reference?`<small>${message.linked?'Avance digital vinculado':'Pendiente de vincular'} · ${escapeHTML(message.reference)}</small>`:''}<small>Registró ${escapeHTML(message.actor||'Operador sin identificar')} · ${caseTime(message.sentAt)} (Puebla)</small>
+      ${message.receivedAt?`<small>Acuse ${message.type==='instruction'?'de brigada':'de Coordinación'} · Registró ${escapeHTML(message.ackActor||'Operador sin identificar')} · ${caseTime(message.receivedAt)} (Puebla)</small>`:
       field||details.closedAt?'':`<button type="button" data-radio-ack="${escapeHTML(message.id)}">Registrar acuse de radio</button>`}
     </li>`).join('')}</ul>`:'<p class="muted">Sin mensajes registrados.</p>'}
   </section>`;
@@ -1439,7 +1443,9 @@ function roleHome(){
 function pendingFieldReports(){
   const entries=readCaseStorage(reportQueueKey,[]).filter(item=>item.caseId===caseId&&(item.operatorKey||'')===operatorKey);
   return entries.length?`<section class="card"><h2>Reportes pendientes de envío</h2><ul>
-    ${entries.map(item=>`<li>${escapeHTML(item.attention.note)} · Referencia ${escapeHTML(item.attention.id)}</li>`).join('')}
+    ${entries.map(item=>`<li>${escapeHTML(item.attention.note)}<label>Referencia para comunicar por radio
+      <input readonly value="${escapeHTML(item.attention.id)}"></label>
+      <button type="button" data-copy-radio-reference>Copiar referencia</button><span role="status"></span></li>`).join('')}
     </ul><button type="button" data-retry-case-sync>Reintentar envío</button></section>`:'';
 }
 
@@ -1465,7 +1471,7 @@ function brigadeView(){
     ${connection.startsWith('Sin conexión')?`<p role="status">${escapeHTML(connection)}</p>`:''}
     ${brigadeTaskList()}${task}
     ${accepted?`${pendingFieldReports()}${attentionPanel(details,stage,true)}
-      ${details.radioMessages?.length?`<details class="card brigade-radio"><summary>Comunicaciones por radio</summary>${radioLog(details,stage,true)}</details>`:''}`:''}`;
+      <details class="card brigade-radio"><summary>Comunicaciones por radio</summary>${radioLog(details,stage,true)}</details>`:''}`;
 }
 
 let bulletinData=null;
@@ -1763,6 +1769,18 @@ app.addEventListener('click',async event=>{
     return;
   }
   if(button.dataset.openCase){selectCase(Number(button.dataset.openCase));return}
+  if(button.hasAttribute('data-copy-radio-reference')){
+    const input=button.previousElementSibling.querySelector('input');
+    const status=button.nextElementSibling;
+    try{
+      await navigator.clipboard.writeText(input.value);
+      status.textContent='Referencia copiada.';
+    }catch{
+      input.select();
+      status.textContent='Referencia seleccionada. Puedes copiarla manualmente.';
+    }
+    return;
+  }
   if(button.hasAttribute('data-retry-case-sync')){await sync();render();return}
   if(button.dataset.caseOperation){
     update(incident.stage,incident.count,null,null,null,null,{type:button.dataset.caseOperation});
