@@ -88,7 +88,7 @@ function ruralFilters(){
 const places=[
 ['Refugio temporal de Cholula','Av. 14 Poniente 307, Centro',0,'Abierto','Rampa de entrada y sanitarios accesibles.'],
 ['Refugio Deportivo Santiago','Calle 9 Norte s/n, Barrio de Santiago',0,'Abierto','Accesibilidad pendiente de confirmar.'],
-['Auditorio Municipal','Palacio Municipal',1,'Abierto','Acceso verificado en el ejercicio. Capacidad nominal de 500 personas.'],
+['Auditorio Municipal','Palacio Municipal',1,'Abierto','Capacidad nominal de 500 personas.'],
 ['Esc. 1º de enero','2 Sur y 3 Oriente',1,'Acceso bloqueado','Capacidad nominal de 300 personas.'],
 ['Esc. Manuel Acuña Hernández','Av. Benito Juárez 147, Tacopan',1,'Sin confirmar','Capacidad nominal de 250 personas.'],
 ['Esc. Ignacio Zaragoza','Ignacio Zaragoza #2',1,'Sin confirmar','Capacidad nominal de 400 personas.'],
@@ -106,7 +106,7 @@ const ruralShelters={
 };
 const shelterPlan='https://proteccioncivil.puebla.gob.mx/images/site/planes/PLAN-HIDROMETEOROLOGICO.pdf';
 let town=1,mode='lista',zoom=1,incident=null,coordEditing=false;
-let shelterQuery='',shelterStatus='',shelterMapId=null;
+let shelterQuery='',shelterMapId=null;
 let hazardLayer='rain';
 let roadReports=[],roadBlocked=[],roadMode='cargando',roadLoading=false,routeDestination=null,routeOrigin=null,routeReportPoint=null,routeMapMode='origin',routeResult=null,routeMapInstance=null,routeMapLayers=null,routeRequestId=0,routeNotice='';
 let revision='',connection='Cargando registro municipal…';
@@ -358,10 +358,6 @@ const app=document.querySelector('#app');
 const tile=(k,title,sub)=>'<a class="tile" href="#'+k+'"><span class="icon">'+icon(k)+'</span><div><b>'+title+'</b><span class="muted">'+sub+'</span></div><span class="chev">›</span></a>';
 const back=(k=profiles[profile].start,label=profiles[profile].pages[k]||'Inicio')=>'<a class="link back" href="#'+k+'">‹ '+label+'</a>';
 const pill=p=>'<span class="pill '+(p==='Abierto'?'':'neutral')+'">'+p+'</span>';
-const alerts=[
-  ['Actividad del Popocatépetl','Amarillo Fase 2 en el escenario de Cholula.','Boletín volcánico de ejemplo'],
-  ['Inundación en Atempan','La mesa municipal revisa accesos y disponibilidad para alojar a las familias.','Reporte municipal de ejemplo']
-];
 const stageName=['Sin incidente registrado','Pendiente de asignación','Brigada asignada','Recepción confirmada'];
 const checklist = [
   'Acordar un punto de encuentro con mi familia',
@@ -370,14 +366,40 @@ const checklist = [
   'Guardar copias de documentos importantes',
   'Consultar los refugios de mi municipio'
 ];
-let prepared = [];
-try {
-  const saved = JSON.parse(localStorage.getItem('sicep.prepared') || '[]');
-  if (Array.isArray(saved)) prepared = saved.filter(i => Number.isInteger(i) && i >= 0 && i < checklist.length);
-} catch {}
+let prepared=[];
 const planAccountKey='sicep.plan.account.v1';
 let planSession=null;
 let pendingPlanEdit=null;
+
+async function planAccountId(email){
+  const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(email));
+  return [...new Uint8Array(hash)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
+}
+
+function planDataKey(key,id=planSession?.id||'guest'){
+  return `${key}.${id}`;
+}
+
+function loadPlanData(){
+  const read=(key,fallback)=>readCaseStorage(planDataKey(key),fallback);
+  const saved=read(homeStore,{});
+  household={people:Array.isArray(saved.people)?saved.people:[],pets:Array.isArray(saved.pets)?saved.pets:[]};
+  suppliesChecked=read('sicep.supplies.v1',[]);
+  prepared=read('sicep.prepared',[]);
+  familyPlan={...emptyFamilyPlan,...read(planStore,{})};
+  vaultRecord=read(vaultStore,null);
+  vaultOpen=false;
+  vaultKey=null;
+  vaultData=null;
+  vaultMessage='';
+}
+
+function migratePlanData(id){
+  for(const key of [homeStore,planStore,vaultStore,'sicep.supplies.v1','sicep.prepared']){
+    const scoped=planDataKey(key,id),legacy=localStorage.getItem(key);
+    if(legacy!==null&&localStorage.getItem(scoped)===null)localStorage.setItem(scoped,legacy);
+  }
+}
 
 function curpAge(value){
   const match=/^[A-ZÑ]{4}(\d{2})(\d{2})(\d{2})[HM][A-Z]{2}[A-ZÑ]{3}([A-Z0-9])\d$/.exec(value);
@@ -392,12 +414,22 @@ function curpAge(value){
   return age>=0?age:null;
 }
 
+function openPlanSession(dialog,session){
+  planSession=session;
+  loadPlanData();
+  const action=pendingPlanEdit;
+  pendingPlanEdit=null;
+  dialog.close();
+  render();
+  action?.();
+}
+
 function requestPlanEdit(resume){
   pendingPlanEdit=resume;
   const dialog=document.createElement('dialog');
   dialog.className='household-dialog';
   dialog.setAttribute('aria-labelledby','plan-access-title');
-  const existing=Boolean(localStorage.getItem(planAccountKey));
+  const existing=Boolean(localStorage.getItem(planAccountKey)||localStorage.getItem('sicep.plan.has-account'));
   dialog.innerHTML=`
     <h2 id="plan-access-title">Acceso a Mi plan</h2>
     <div class="segment" role="group" aria-label="Tipo de acceso">
@@ -409,22 +441,16 @@ function requestPlanEdit(resume){
   const modes=[...dialog.querySelectorAll('[data-plan-mode]')];
   function showMode(mode){
     const login=mode==='login';
-    const hasAccount=Boolean(localStorage.getItem(planAccountKey));
     modes.forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.planMode===mode)));
-    if(login!==hasAccount){
-      content.innerHTML=`<p role="status">${login?'Primero crea una cuenta con la opción Registrarse.':'Ya hay una cuenta para Mi plan en este navegador. Usa Iniciar sesión para acceder a tu plan.'}</p>
-        <button type="button" class="household-cancel" data-plan-cancel>Cancelar</button>`;
-      return;
-    }
     content.innerHTML=`<form>
-    <p class="household-privacy">Cuenta local de este navegador. La CURP y el correo se guardan cifrados en este dispositivo.</p>
+    <p class="household-privacy">Puedes dejar los campos vacíos para continuar sin cuenta. Si ya tienes una cuenta, ingresa tus datos para abrir tu plan guardado.</p>
     ${login?'':'<label>Nombre completo<input name="name" autocomplete="name" maxlength="120" required></label>'}
     <label>CURP<input name="curp" minlength="18" maxlength="18" autocapitalize="characters" spellcheck="false" required></label>
     <label>Correo electrónico<input name="email" type="email" autocomplete="email" maxlength="254" required></label>
     <label>Edad<input name="age" readonly></label>
     <label>Contraseña${login?'':' (mínimo 8 caracteres)'}<input name="password" type="password" autocomplete="${login?'current-password':'new-password'}" minlength="8" required></label>
     <p data-plan-access-error role="alert"></p>
-    <div class="household-dialog-actions"><button class="household-cancel" type="button" data-plan-cancel>Cancelar</button><button class="household-save" type="submit">${login?'Iniciar sesión':resume?'Registrarse y continuar':'Registrarse'}</button></div>
+    <div class="household-dialog-actions"><button class="household-cancel" type="button" data-plan-cancel>Cancelar</button><button class="household-save" type="submit" formnovalidate>${login?'Iniciar sesión':resume?'Registrarse y continuar':'Registrarse'}</button></div>
   </form>`;
     const form=dialog.querySelector('form'),curpInput=form.elements.curp,submit=form.querySelector('[type=submit]');
     const readCurp=()=>curpInput.value.trim().toUpperCase();
@@ -434,35 +460,60 @@ function requestPlanEdit(resume){
       const data=new FormData(form),curp=readCurp(),age=curpAge(curp);
       const email=String(data.get('email')).trim().toLowerCase(),password=String(data.get('password'));
       const error=form.querySelector('[data-plan-access-error]');
+      const name=String(data.get('name')||'').trim();
+      if(!curp&&!email&&!password&&!name){
+        openPlanSession(dialog,{id:'guest'});
+        return;
+      }
+      if(!form.reportValidity())return;
       if(age===null){error.textContent='Revisa la estructura y la fecha de nacimiento de la CURP.';return}
       submit.disabled=true;
       modes.forEach(button=>{button.disabled=true});
       error.textContent='';
       try{
-        const saved=localStorage.getItem(planAccountKey);
+        let id=await planAccountId(email);
+        const keyName=`${planAccountKey}.${id}`;
+        const saved=localStorage.getItem(keyName);
+        const legacy=localStorage.getItem(planAccountKey);
         let account;
-        if(Boolean(saved)!==login){showMode(mode);return}
         if(login){
-          account=(await decryptVault(JSON.parse(saved),password)).data;
-          if(account.curp!==curp||account.email!==email)throw new Error();
+          const candidates=[[saved,id],[localStorage.getItem(keyName+'.legacy'),id+'.legacy'],[legacy,null]];
+          for(const [record,accountId] of candidates){
+            if(!record)continue;
+            const opened=await decryptVault(JSON.parse(record),password).catch(()=>null);
+            if(opened?.data.curp!==curp||opened.data.email!==email)continue;
+            if(!dialog.open)return;
+            account=opened.data;
+            if(accountId)id=accountId;
+            else{
+              if(localStorage.getItem(keyName))id+='.legacy';
+              const destination=`${planAccountKey}.${id}`;
+              if(localStorage.getItem(destination)||localStorage.getItem(planAccountKey)!==legacy)throw Error();
+              migratePlanData(id);
+              localStorage.setItem(destination,legacy);
+              localStorage.removeItem(planAccountKey);
+            }
+            break;
+          }
+          if(!account)throw Error();
         }else{
-          const name=String(data.get('name')||'').trim();
+          if(saved){error.textContent='Ese correo ya tiene una cuenta. Elige Iniciar sesión.';return}
           if(!name){error.textContent='Escribe tu nombre completo.';return}
+          if(legacy){
+            const original=await decryptVault(JSON.parse(legacy),password).catch(()=>null);
+            if(original?.data.email===email){error.textContent='Ese correo ya tiene una cuenta. Elige Iniciar sesión.';return}
+          }
           account={curp,email,name};
           const salt=crypto.getRandomValues(new Uint8Array(16));
           const key=await deriveVaultKey(password,salt);
           const encrypted=await encryptVault(account,key,salt);
           if(!dialog.open)return;
-          if(localStorage.getItem(planAccountKey))throw new Error();
-          localStorage.setItem(planAccountKey,JSON.stringify(encrypted));
+          if(localStorage.getItem(keyName)){error.textContent='Ese correo ya tiene una cuenta. Elige Iniciar sesión.';return}
+          localStorage.setItem(keyName,JSON.stringify(encrypted));
         }
         if(!dialog.open)return;
-        planSession={name:account.name,age};
-        const action=pendingPlanEdit;
-        pendingPlanEdit=null;
-        dialog.close();
-        updatePlanAccess();
-        action?.();
+        localStorage.setItem('sicep.plan.has-account','1');
+        openPlanSession(dialog,{id,name:account.name,age});
       }catch{
         error.textContent=login?'Revisa la CURP, el correo y la contraseña.':'No se pudo crear el acceso en este navegador.';
       }finally{
@@ -495,16 +546,15 @@ function renderPlanHeader(){
 
 function updatePlanAccess(){
   const bar=app.querySelector('#plan-edit-access');
-  if(bar)bar.innerHTML=planSession?`<span>${escapeHTML(planSession.name)} · ${planSession.age} años</span> <button type="button" class="route-refresh" data-plan-signout>Cerrar sesión de edición</button>`:
-    `<button type="button" class="btn" data-plan-access>Registrarse o iniciar sesión</button>`;
-  for(const field of app.querySelectorAll('#family-plan-form input, #family-plan-form textarea, #vault-note')){
-    field.readOnly=!planSession;
-  }
+  if(!bar)return;
+  bar.innerHTML=planSession?
+    `<span>${planSession.id==='guest'?'Acceso sin cuenta':`${escapeHTML(planSession.name)} · ${planSession.age} años`}</span> <button type="button" class="route-refresh" data-plan-signout>Salir</button>`:
+    '<button type="button" class="btn" data-plan-access>Registrarse o iniciar sesión</button>';
 }
 
 const homeStore='sicep.household.v1';
 let household={people:[],pets:[]};
-try{const saved=JSON.parse(localStorage.getItem(homeStore)||'{}');household={people:Array.isArray(saved.people)?saved.people:[],pets:Array.isArray(saved.pets)?saved.pets:[]}}catch{}
+
 function householdTabs(active){
   const tabs=[['hogar','Hogar','hogar'],['suministros','Suministros','suministros'],['plan','Plan','guia'],['documentos','Documentos','documentos']];
   return `<nav class="plan-tabs" aria-label="Mi plan">${tabs.map(([key,title,glyph])=>
@@ -533,25 +583,25 @@ const supplyItems=[
 ['Higiene personal: jabón, cepillo, pasta y productos menstruales','Adapte la cantidad a las necesidades del hogar.','optional'],['Utensilios, platos y vasos','Prefiera artículos reutilizables si dispone de agua para lavarlos.','optional'],
 ['Papel, lápices y actividades para niñas y niños','Pueden ayudar a mantenerlos ocupados durante la espera.','optional'],['Libros, cartas o juegos','Incluya algo que ayude a pasar el tiempo y mantener el ánimo.','optional']
 ];
-let suppliesChecked=[];try{const saved=JSON.parse(localStorage.getItem('sicep.supplies.v1')||'[]');if(Array.isArray(saved))suppliesChecked=saved.filter(i=>Number.isInteger(i)&&i>=0&&i<supplyItems.length)}catch{}
+let suppliesChecked=[];
 function supplies(){
   const people=household.people.length,pets=household.pets.length,petKg=household.pets.reduce((sum,p)=>sum+(Number(p.weight)||0),0),perDay=people+petKg*.0667/3.785,three=Math.ceil(perDay*3*10)/10,fourteen=Math.ceil(perDay*14*10)/10,calories=people*2000,checked=new Set(suppliesChecked);
   const items=supplyItems.map(([name,description,priority],i)=>`<div class="supply-item"><label><input type="checkbox" data-supply="${i}" ${checked.has(i)?'checked':''}><span class="supply-name">${name}</span><small class="supply-tag ${priority}">${priority==='required'?'Esencial':'Adicional'}</small></label><details><summary><span class="supply-open">Ver indicación</span><span class="supply-close">Cerrar indicaciones</span></summary><p>${description}</p></details></div>`).join('');
   return `<h1>Mi plan</h1>${householdTabs('suministros')}<section class="household-section supplies-overview"><h2>Sus suministros</h2><p class="household-intro">Comience por los artículos esenciales y marque cada uno a medida que lo consiga. Las cantidades de agua se ajustan a su hogar.</p><div class="supply-metrics"><article><span>Hogar</span><b>${people}</b><small>personas${pets?` · ${pets} ${pets===1?'mascota':'mascotas'}`:''}</small></article><article><span>Agua · 3 días</span><b>${three.toLocaleString('es-MX')}</b><small>galones aprox.</small></article><article><span>Agua · 2 semanas</span><b>${fourteen.toLocaleString('es-MX')}</b><small>galones aprox.</small></article><article><span>Calorías diarias</span><b>${calories.toLocaleString('es-MX')}</b><small>kcal aprox. para adultos</small></article></div>${people?'<p class="supplies-note">Referencia: 1 galón (3.8 L) por persona al día; se suma una estimación para mascotas con peso registrado.</p>':'<p class="supplies-empty">Agregue a las personas de su hogar en <a href="#guia/hogar">Hogar</a> para personalizar estas cantidades.</p>'}</section><section class="household-section supply-checklist"><h2>Lista de verificación</h2><p class="household-intro">Los artículos esenciales se señalan como tales. Abra “Ver indicación” para leer recomendaciones.</p><div class="supply-items">${items}</div><p class="supplies-progress" id="supplies-progress">${checked.size} de ${supplyItems.length} artículos marcados</p></section><section class="household-section supply-guidance"><h2>Calculadora de agua y alimentos</h2><p class="household-intro">Guarde agua y alimentos para varios días. Dos semanas dan más margen, si tiene dónde almacenarlos.</p><h3>Agua</h3><p>Planee 1 galón (3.8 L) por persona al día para beber e higiene. Guarde el agua en recipientes limpios aptos para alimentos y renuévela cada seis meses.</p><p>Considere agua adicional para mascotas, calor, lactancia o enfermedad. La estimación para mascotas es aproximada.</p><p>Si no cuenta con agua embotellada segura y las autoridades no advierten contaminación química, filtre primero el agua turbia. Hierva hasta hervor continuo por 1 minuto; a más de 2,000 m de altitud, por 3 minutos. Como alternativa, para agua clara use cloro líquido sin aroma con hipoclorito de sodio al 5–9%: 8 gotas por galón y espere 30 minutos. Si está turbia o muy fría, duplique la dosis. Esto no elimina combustibles, químicos ni material radiactivo; en esos casos no la consuma y siga indicaciones oficiales.</p><h3>Alimentos</h3><p>Como referencia general, calcule alrededor de 2,000 kcal por adulto al día; las necesidades de niñas y niños varían según su edad y actividad. Priorice alimentos que no requieran refrigeración, mucha agua ni preparación complicada.</p><p>Incluya opciones para alergias, dietas especiales, bebés y mascotas. Revise caducidades y consuma y reponga lo almacenado.</p><p class="supply-sources">Fuentes: <a href="https://www.ready.gov/es/kit" target="_blank" rel="noopener">Ready.gov · Kit de suministros</a> · <a href="https://www.cdc.gov/water-emergency/about/" target="_blank" rel="noopener">CDC · Agua segura en emergencias</a>.</p></section>`;
 }
 const planStore='sicep.plan.v1';
-let familyPlan={contactName:'',contactPhone:'',contactAlt:'',localMeeting:'',regionalMeeting:'',notes:''};
-try{familyPlan={...familyPlan,...JSON.parse(localStorage.getItem(planStore)||'{}')}}catch{}
+const emptyFamilyPlan={contactName:'',contactPhone:'',contactAlt:'',localMeeting:'',regionalMeeting:'',notes:''};
+let familyPlan={...emptyFamilyPlan};
 function planPage(){return `<h1>Mi plan</h1>${householdTabs('plan')}<section class="household-section family-plan"><h2>Plan de comunicación</h2><p class="household-intro">El servicio de larga distancia suele restablecerse antes que el local. Elijan a una persona fuera de su región como contacto central y acuerden que todos se reporten con ella.</p><form id="family-plan-form"><h3>Contacto fuera del área</h3><div class="household-form-grid"><label>Nombre<input name="contactName" maxlength="120" value="${escapeHTML(familyPlan.contactName)}" placeholder="p. ej. Tía Kim en Monterrey"></label><label>Teléfono<input name="contactPhone" type="tel" maxlength="40" value="${escapeHTML(familyPlan.contactPhone)}" placeholder="+52 222 555 0100"></label></div><label>Correo / alternativo<input name="contactAlt" maxlength="150" value="${escapeHTML(familyPlan.contactAlt)}" placeholder="opcional"></label><h3>Puntos de reunión</h3><p>Si la casa no es segura, ¿dónde se encuentran? Elijan uno cerca y otro más lejos.</p><label>Punto de reunión local (cerca de casa)<input name="localMeeting" maxlength="200" value="${escapeHTML(familyPlan.localMeeting)}" placeholder="p. ej. patio delantero, buzón"></label><label>Punto de reunión regional (si se evacua el vecindario)<input name="regionalMeeting" maxlength="240" value="${escapeHTML(familyPlan.regionalMeeting)}" placeholder="p. ej. biblioteca en calle 10 y Principal, casa de la abuela"></label><label>Notas del plan (fechas de simulacros, rutinas)<textarea name="notes" rows="4" maxlength="1000">${escapeHTML(familyPlan.notes)}</textarea></label><div class="household-dialog-actions"><span id="plan-status" role="status">Guardado en este dispositivo.</span><button class="household-save" type="submit">Guardar plan</button></div></form><aside class="plan-advice"><b>Primero mensaje de texto, después llamada.</b> Los mensajes pueden pasar cuando las llamadas fallan. Acuerden una palabra clave que confirme que están a salvo.</aside><p class="household-privacy">El plan se guarda solo en este dispositivo.</p></section>`}
 const documentItems=['Licencia de conducir / identificación oficial','Pasaporte','Seguro Social / tarjeta de identidad nacional','Acta de nacimiento','Acta de matrimonio / divorcio','Escrituras / contrato de arrendamiento','Título / registro del vehículo','Pólizas de seguro (hogar, auto, salud, vida)','Cartilla de vacunación','Expediente médico / lista de medicamentos','Vacunación de las mascotas','Contactos de emergencia','Números de cuenta y tarjetas (foto de frente y reverso)','Recibo de servicios reciente (comprobante de domicilio)','Fotos de objetos de valor (para reclamaciones de seguro)','Testamento / poder notarial'];
 const vaultStore='sicep.documents.vault.v1';let vaultRecord=null,vaultKey=null,vaultData=null,vaultOpen=false,vaultMessage='';
-try{vaultRecord=JSON.parse(localStorage.getItem(vaultStore)||'null')}catch{}
+
 const toB64=bytes=>btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const fromB64=value=>Uint8Array.from(atob(value),c=>c.charCodeAt(0));
 async function deriveVaultKey(password,salt,iterations=600000){const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['encrypt','decrypt'])}
 async function encryptVault(data,key,salt,iterations=600000){const iv=crypto.getRandomValues(new Uint8Array(12)),encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(JSON.stringify(data)));return{version:1,iterations,salt:toB64(salt),iv:toB64(iv),ciphertext:toB64(encrypted)}}
 async function decryptVault(record,password){const salt=fromB64(record.salt),key=await deriveVaultKey(password,salt,record.iterations||310000),bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:fromB64(record.iv)},key,fromB64(record.ciphertext));return{key,iterations:record.iterations||310000,data:JSON.parse(new TextDecoder().decode(bytes)),salt}}
-async function saveVault(){if(!vaultKey||!vaultData||!vaultRecord)return false;try{const next=await encryptVault(vaultData,vaultKey,fromB64(vaultRecord.salt),vaultRecord.iterations||600000);localStorage.setItem(vaultStore,JSON.stringify(next));vaultRecord=next;const status=document.querySelector('#vault-status');if(status)status.textContent='Cambios guardados y cifrados en este dispositivo.';return true}catch{const status=document.querySelector('#vault-status');if(status)status.textContent='No se pudieron guardar los cambios; libera espacio e inténtalo de nuevo.';return false}}
+async function saveVault(){if(!vaultKey||!vaultData||!vaultRecord)return false;try{const session=planSession;const next=await encryptVault(vaultData,vaultKey,fromB64(vaultRecord.salt),vaultRecord.iterations||600000);if(planSession!==session)return false;localStorage.setItem(planDataKey(vaultStore),JSON.stringify(next));vaultRecord=next;const status=document.querySelector('#vault-status');if(status)status.textContent='Cambios guardados y cifrados en este dispositivo.';return true}catch{const status=document.querySelector('#vault-status');if(status)status.textContent='No se pudieron guardar los cambios; libera espacio e inténtalo de nuevo.';return false}}
 function documentsPage(){
   const supported=Boolean(globalThis.crypto?.subtle),unlocked=supported&&vaultOpen&&vaultData;
   const warning='<aside class="vault-warning"><b>Importante:</b> Si olvidas la contraseña, la bóveda no se puede recuperar. No hay puerta trasera. Anótala y guárdala en un lugar físico seguro, separado de este dispositivo.</aside>';
@@ -584,12 +634,28 @@ const planTopics = [
 function volcanoPlan(){
   return `<div class="guidance-back">${back('inicio','Inicio')}</div><small class="kicker">Programa Especial para Contingencias</small><h1>Plan Popocatépetl</h1>
   <p class="guidance-intro">Qué significan los peligros del volcán y cómo preparar a tu hogar antes de una contingencia.</p>
-  <section class="volcano-dashboard" aria-labelledby="volcano-dashboard-title"><div class="volcano-dashboard-head"><div><small>Referencia visual del ejercicio</small><h2 id="volcano-dashboard-title">Semáforo y dirección del viento</h2></div></div><div class="volcano-dashboard-grid"><section class="volcano-indicator"><h3>Semáforo de alerta volcánica</h3><strong class="volcano-level">AMARILLO · FASE 2</strong><div class="traffic-light" role="img" aria-label="Ejemplo visual: amarillo, fase 2"><span class="traffic-lamp traffic-green"></span><span class="traffic-lamp traffic-yellow active"></span><span class="traffic-lamp traffic-red"></span></div><p class="volcano-indicator-note">El color mostrado es ilustrativo; consulta los avisos de tu localidad para conocer el nivel vigente.</p></section><section class="volcano-indicator wind-indicator"><h3>Dirección del viento</h3><strong class="wind-direction">ESTE</strong><div class="compass" role="img" aria-label="Ejemplo de brújula señalando al Este"><span class="compass-n">N</span><span class="compass-e">E</span><span class="compass-s">S</span><span class="compass-w">O</span><span class="compass-arrow">➤</span></div><p class="volcano-indicator-note">La dirección puede cambiar; este gráfico no es una medición meteorológica en tiempo real.</p></section></div></section>
+  <section class="volcano-dashboard" aria-labelledby="volcano-dashboard-title">
+    <div class="volcano-dashboard-head"><h2 id="volcano-dashboard-title">Monitoreo del Popocatépetl</h2></div>
+    <div class="volcano-dashboard-grid">
+      <section class="volcano-indicator">
+        <h3>Cómo leer el semáforo volcánico</h3>
+        <strong class="volcano-level">Amarillo · Fase 2</strong>
+        <div class="traffic-light" role="img" aria-label="Semáforo volcánico con la luz amarilla destacada"><span class="traffic-lamp traffic-green"></span><span class="traffic-lamp traffic-yellow active"></span><span class="traffic-lamp traffic-red"></span></div>
+        <a class="link" href="#avisos">Ver avisos en SICEP</a>
+      </section>
+      <section class="volcano-indicator wind-indicator">
+        <h3>Puntos cardinales</h3>
+        <strong class="wind-direction">Este</strong>
+        <div class="compass" role="img" aria-label="Brújula que señala el este"><span class="compass-n">N</span><span class="compass-e">E</span><span class="compass-s">S</span><span class="compass-w">O</span><span class="compass-arrow">➤</span></div>
+        <a class="link" href="#mapa">Ver mapa y pronóstico</a>
+      </section>
+    </div>
+  </section>
   <aside class="guidance-lead volcano-lead"><b>Lo más importante</b><p>Ten listo tu plan familiar y conoce tu punto de reunión. Si las autoridades ordenan evacuar, sal por el punto, la ruta y el transporte indicados para tu comunidad.</p></aside>
   <div class="guidance-grid volcano-guide-grid">
     <section class="guidance-card"><small>Peligros volcánicos</small><h2>Qué puede ocurrir</h2><ul><li><b>Caída de ceniza:</b> puede afectar la respiración, contaminar agua y alimentos y acumular peso en los techos.</li><li><b>Flujos piroclásticos:</b> mezclas muy calientes de gases y material volcánico que descienden rápidamente y son destructivas.</li><li><b>Lahares:</b> lodo, agua y escombro que pueden bajar por barrancas y cauces; la lluvia puede favorecer su formación.</li><li><b>Material expulsado:</b> fragmentos y rocas representan mayor peligro cerca del cráter.</li></ul></section>
     <section class="guidance-card"><small>Territorio</small><h2>El riesgo cambia según la zona</h2><p>El programa distingue zonas de peligro mayor, moderado y menor. También identifica comunidades expuestas a flujos de lodo; la topografía y los cauces pueden cambiar la clasificación de una localidad.</p><p>El documento registra, con datos de población del Censo 2020, 24 comunidades en zona de peligro mayor (56,394 habitantes), 7 comunidades con peligro de flujo de lodo (29,861) y 42 comunidades en zona de peligro moderado (73,522). Las cifras corresponden a categorías del plan y pueden superponerse.</p><p>Entre las localidades señaladas en peligro mayor están Santiago Xalitzintla, San Nicolás de los Ranchos, San Mateo Ozolco, San Pedro Atlixco y San Baltazar Atlimeyaya.</p></section>
-    <section class="guidance-card"><small>Semáforo de alerta</small><h2>Cómo interpretar la preparación</h2><p>El plan describe acciones preventivas para <b>Amarillo Fase 3</b>: tener documentos a la mano, ubicar puntos de reunión y abordaje, preparar el hogar y mantenerse atento a las indicaciones de las autoridades.</p><p>El plan señala que esa fase de preparación no inicia por sí misma una evacuación. La <b>Alerta Roja Fase 1</b> se considera con base en los reportes y la evacuación se ordena por la autoridad competente.</p><p>No tomes el semáforo ilustrado arriba como aviso vigente. Atiende los mensajes oficiales y municipales.</p></section>
+    <section class="guidance-card"><small>Semáforo de alerta</small><h2>Cómo interpretar la preparación</h2><p>El plan describe acciones preventivas para <b>Amarillo Fase 3</b>: tener documentos a la mano, ubicar puntos de reunión y abordaje, preparar el hogar y mantenerse atento a las indicaciones de las autoridades.</p><p>El plan señala que esa fase de preparación no inicia por sí misma una evacuación. La <b>Alerta Roja Fase 1</b> se considera con base en los reportes y la evacuación se ordena por la autoridad competente.</p></section>
     <section class="guidance-card"><small>Antes de una contingencia</small><h2>Deja un plan familiar preparado</h2><ul><li>Acuerden cómo se comunicarán y un punto de encuentro dentro y fuera de la localidad.</li><li>Definan quién acompaña a niñas, personas mayores, personas con discapacidad y mascotas.</li><li>Identifiquen el punto de reunión, el abordaje del transporte y el refugio asignado a su comunidad.</li><li>Guarden documentos, medicamentos necesarios, agua y alimento para personas y animales.</li><li>Practiquen cómo cerrar gas y electricidad, siempre que hacerlo sea seguro.</li><li>Eviten rumores y compartan solo información confirmada por autoridades.</li></ul><div class="volcano-shortcuts"><a class="link" href="#guia/plan">Preparar plan familiar</a><a class="link" href="#guia/suministros">Revisar suministros</a><a class="link" href="#guia/documentos">Organizar documentos</a></div></section>
     <section class="guidance-card"><small>Si cae ceniza</small><h2>Cuida a las personas y a los animales</h2><ul><li>Permanece bajo techo y limita las actividades al aire libre.</li><li>Si necesitas salir, usa protección para nariz, boca y ojos; sigue las indicaciones de salud locales.</li><li>Cierra puertas y ventanas. Cubre depósitos de agua, comida y alimentos de mascotas.</li><li>Mantén a los animales bajo resguardo y con agua y alimento protegidos de la ceniza.</li><li>Evita que la ceniza llegue a coladeras, drenajes o cuerpos de agua.</li></ul></section>
     <section class="guidance-card"><small>Si se ordena evacuar</small><h2>Sal con calma y por la ruta asignada</h2><ul><li>Dirígete al punto de reunión indicado y aborda el transporte dispuesto para tu localidad.</li><li>Lleva identificación, medicamentos indispensables, agua y artículos esenciales; procura que las familias permanezcan juntas.</li><li>Sigue la ruta y las instrucciones de las autoridades. No improvises atajos ni regreses por objetos.</li><li>Ve al refugio que te indiquen y registra a las personas de tu hogar al llegar.</li><li>No vuelvas a la zona evacuada hasta que las autoridades permitan el regreso.</li></ul></section>
@@ -913,9 +979,9 @@ function routesPage(){
       <p>Consulta los refugios publicados y sus condiciones de acceso antes de salir.</p>
       <a class="link" href="#refugios">Consultar refugios</a></section>`;
   if(!routeOrigin)routeOrigin=[...townCenters[town]];
-  const openDestinations=places.map((p,i)=>p[2]===town&&p[3]==='Abierto'?[p,i]:null).filter(Boolean);
-  if(!openDestinations.some(([,i])=>i===routeDestination))routeDestination=openDestinations[0]?.[1]??null;
-  const destinations=openDestinations.map(([p,i])=>'<option value="'+i+'" '+(i===routeDestination?'selected':'')+'>'+escapeHTML(p[0])+'</option>').join('');
+  const mappedDestinations=places.map((p,i)=>p[2]===town&&refugeCoordinates[town]?.[i]?[p,i]:null).filter(Boolean);
+  if(!mappedDestinations.some(([,i])=>i===routeDestination))routeDestination=mappedDestinations[0]?.[1]??null;
+  const destinations=mappedDestinations.map(([p,i])=>'<option value="'+i+'" '+(i===routeDestination?'selected':'')+'>'+escapeHTML(p[0])+'</option>').join('');
   const list=numberedReportsForTown(town);
   const reportRows=list.length?list.map(({report:r,number})=>{
     const photo=r.photo||(r.hasPhoto&&roadMode==='compartido'?'/api/routes/photo/'+encodeURIComponent(r.id):'');
@@ -929,7 +995,7 @@ function routesPage(){
   return (profile==='brigada'?back():back('refugios','Refugios temporales'))+'<div class="map-heading"><div><h1>'+(reporting?'Reportar un problema':'Rutas')+'</h1></div>'+ruralFilters()+'</div>'+(routeNotice&&!reporting?'<p class="route-feedback" role="status">'+escapeHTML(routeNotice)+'</p>':'')+
   '<section class="route-section route-live '+(reporting?'route-reporting':'')+'">'+(reporting?'<div class="route-section-head"><div><small>'+escapeHTML(towns[town])+'</small><h2>Marca el lugar afectado</h2></div></div>':'<div class="route-section-head"><div><small>'+escapeHTML(towns[town])+'</small><h2>Cómo llegar</h2></div><label class="route-destination">Refugio<select id="route-destination" '+(routeDestination===null?'disabled':'')+'>'+destinations+'</select></label></div>')+
   (reporting?'<div class="route-map-tools"><button type="button" data-route-mode="origin">Cancelar reporte</button></div>':'<div class="route-map-tools"><button type="button" data-route-mode="origin" class="selected">Elegir salida</button><button type="button" data-route-mode="report">Reportar peligro</button><button type="button" class="route-location" data-route-location>Usar mi ubicación</button></div>')+
-  '<p class="route-map-hint" id="route-map-hint">'+escapeHTML(reporting?'Toca el mapa para marcar el punto del problema.':'Toca el mapa para elegir tu punto de partida.')+'</p><div id="route-real-map" class="route-real-map" role="application" aria-label="Mapa de rutas"></div>'+
+  '<p class="route-map-hint" id="route-map-hint">'+escapeHTML(reporting?'Toca el mapa para marcar el punto del problema.':'Toca el mapa para elegir tu punto de partida. Confirma la apertura del refugio antes de salir.')+'</p><div id="route-real-map" class="route-real-map" role="application" aria-label="Mapa de rutas"></div>'+
   (reporting?'':'<div class="route-map-legend"><span><i class="legend-fast"></i>Ruta sugerida</span><span><i class="legend-safer"></i>Menos reportes cerca</span><span><i class="legend-hazard"></i>Reporte</span><span><i class="legend-refuge"></i>Refugio</span></div><div class="route-route-cards" id="route-route-cards"><div class="route-loading">Buscando ruta…</div></div>')+'</section>'+ 
   (routeMapMode==='report'?'<section class="route-section route-report-panel"><div class="route-section-head"><div><small>Nuevo reporte</small><h2>¿Qué encontraste?</h2></div></div><p class="route-map-hint">Marca primero el punto en el mapa y completa los datos del problema.</p>'+
   '<form id="route-report-form" class="route-form"><p class="route-point-summary route-full" id="route-point-summary">'+(routeReportPoint?'Punto marcado en el mapa.':'Marca el punto en el mapa.')+'</p><label>Qué ocurre<select name="hazard" required>'+Object.entries(hazardLabels).map(([id,name])=>'<option value="'+id+'">'+name+'</option>').join('')+'</select></label><label>Gravedad<select name="severity"><option value="high">Alta</option><option value="medium" selected>Media</option><option value="low">Baja</option></select></label><label>¿Se puede pasar?<select name="impact"><option value="blocked" selected>No</option><option value="partial">Con dificultad</option><option value="passable">Sí, con precaución</option></select></label><label>Descripción <span class="muted">(opcional)</span><textarea name="note" maxlength="350" rows="3" placeholder="Cuéntanos qué viste"></textarea></label><label class="route-full">Foto <span class="muted">(opcional)</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp"></label><small class="route-privacy">Reportes vecinales; confirma la situación antes de salir.</small><button type="submit" '+(!routeReportPoint?'disabled':'')+'>Enviar reporte</button><p class="route-form-status" role="status" aria-live="polite"></p></form></section>':'')+
@@ -972,7 +1038,7 @@ function showRouteResults(){
 }
 async function calculateRoutes(){
   const requestId=++routeRequestId;routeResult=null;showRouteResults();
-  if(routeDestination===null){routeResult={error:'No hay refugios abiertos disponibles en este municipio.'};showRouteResults();return}
+  if(routeDestination===null){routeResult={error:'No hay refugios con ubicación registrada para esta ruta.'};showRouteResults();return}
   const destination=refugeCoordinates[town]?.[routeDestination]||townCenters[town],origin=routeOrigin||townCenters[town];
   const reports=roadReports.filter(r=>Number(r.town)===town);
   try{
@@ -1074,11 +1140,9 @@ function actionPanel(){
 }
 
 function home(){
-  const local=town===1;
   const ruralOverview=ruralRouteTown()===-1||Boolean(ruralLocality());
-  const beds=places.filter(place=>place[2]===town&&place[3]==='Abierto').length;
-  const people=local?(incident?.stage>0?incident.count:incident?0:'—'):0;
   const shelters=places.map((place,id)=>({place,id})).filter(({place})=>place[2]===town);
+  const notices=municipalNews.filter(notice=>notice.towns.includes(town));
   const monitoring=[
     ['volcan','POPOCATEPETL.jpg','Actividad volcánica'],
     ['lluvias','LLUVIAS.jpeg','Lluvias e inundaciones'],
@@ -1101,12 +1165,15 @@ function home(){
       ${ruralOverview?`<p>Consulta la información disponible para esta zona.</p><div class="rural-home-links">
         <a class="link" href="#mapa">Ver mapa y pronóstico</a><a class="link" href="#avisos">Ver comunicados</a><a class="link" href="#refugios">Buscar refugios</a>
       </div>`:`<div class="home-municipal-grid">
-        <article class="card home-municipal-card"><h3>Avisos y reportes</h3>
-          <dl class="home-metrics"><div><dt>Comunicados en el historial</dt><dd>${municipalNews.filter(notice=>notice.towns.includes(town)).length}</dd></div><div><dt>Personas reportadas</dt><dd>${people}</dd></div></dl>
-          <p><strong>Caso de práctica:</strong> ${alerts[town][1]}</p><a class="link" href="#avisos">Consultar comunicados del municipio</a>
+        <article class="card home-municipal-card"><h3>Avisos municipales</h3>
+          <dl class="home-metrics">
+            <div><dt>Comunicados en el historial</dt><dd>${notices.length}</dd></div>
+            ${town===1?'<div><dt>Personas reportadas</dt><dd>35</dd></div>':''}
+          </dl>
+          <a class="link" href="#avisos">Consultar comunicados del municipio</a>
         </article>
-        <article class="card home-municipal-card"><h3>Refugios</h3><p>${beds} ${beds===1?'abierto':'abiertos'} en el ejercicio</p>
-          <ul class="home-shelter-list">${shelters.map(({place,id})=>`<li><a class="shelterLine" href="#detalle/${id}"><span><b>${place[0]}</b><span>${shelterCapacity(id)}</span></span>${shelterBadge(place[3])}</a></li>`).join('')}</ul>
+        <article class="card home-municipal-card"><h3>Refugios</h3><p>Directorio municipal</p>
+          <ul class="home-shelter-list">${shelters.map(({place,id})=>`<li><a class="shelterLine" href="#detalle/${id}"><span><b>${place[0]}</b><span>${shelterCapacity()}</span></span>${shelterBadge('Sin confirmar')}</a></li>`).join('')}</ul>
           <a class="link" href="#refugios">Ver directorio y mapa</a>
         </article>
       </div>`}
@@ -1120,10 +1187,8 @@ function home(){
     </div>
   </div>`;
 }
-function shelterCapacity(id){
-  if(id!==2||!incident)return 'Cupo disponible por confirmar';
-  const available=Math.max(0,40-(incident.stage>=2?incident.count:0));
-  return available===1?'1 lugar disponible en la simulación':available+' lugares disponibles en la simulación';
+function shelterCapacity(){
+  return 'Cupo por confirmar';
 }
 
 function shelterBadge(status){
@@ -1135,7 +1200,7 @@ function shelterResults(){
   const query=normalize(shelterQuery.trim());
   const municipality=shelterTowns.indexOf(ruralMunicipalityName());
   const matches=places.map((place,id)=>({place,id})).filter(({place,id})=>
-    place[2]===municipality && (!ruralLocality()||ruralShelters[id]?.locality===ruralLocality()[1]) && (!shelterStatus||place[3]===shelterStatus) &&
+    place[2]===municipality && (!ruralLocality()||ruralShelters[id]?.locality===ruralLocality()[1]) &&
     normalize([place[0],place[1],ruralShelters[id]?.locality].join(' ')).includes(query)
   );
   const count=matches.length;
@@ -1147,8 +1212,8 @@ function shelterResults(){
     `<ul class="shelter-list">${matches.map(({place,id})=>`
       <li><a class="row shelter-card" href="#detalle/${id}">
         <span class="icon">${icon('refugios')}</span>
-        <div class="shelter-info"><h2>${place[0]}</h2><p>${ruralShelters[id] ? ruralShelters[id].locality+' · ' : ''}${place[1]}</p><p class="shelter-capacity">${shelterCapacity(id)}</p></div>
-        ${shelterBadge(place[3])}
+        <div class="shelter-info"><h2>${place[0]}</h2><p>${ruralShelters[id] ? ruralShelters[id].locality+' · ' : ''}${place[1]}</p><p class="shelter-capacity">${shelterCapacity()}</p></div>
+        ${shelterBadge('Sin confirmar')}
       </a></li>`).join('')}</ul>`}
   `;
 }
@@ -1174,21 +1239,19 @@ function shelterMap(matches){
   return `<div class="map"><div class="mapinner" style="transform:scale(${zoom})">
     ${pins.map(([id,x,y])=>`<a class="pin shelter-pin" href="#detalle/${id}" aria-label="${places[id][0]}" style="left:${x}%;top:${y}%">${icon('refugios')}</a>`).join('')}
     </div><div class="zoom"><button type="button" data-zoom="1" aria-label="Acercar">+</button><button type="button" data-zoom="-1" aria-label="Alejar">−</button></div>
-  </div><p class="hint shelter-map-hint">Mapa ilustrativo de San Pedro Cholula.</p>`;
+  </div><p class="hint shelter-map-hint">Croquis de San Pedro Cholula.</p>`;
 }
 
 function shelters(){
-  const options=['Abierto','Acceso bloqueado','Sin confirmar'];
   return `${back()}
-    <div class="shelter-intro"><span class="kicker">Refugios disponibles</span>
+    <div class="shelter-intro"><span class="kicker">Directorio de refugios</span>
     <h1>Refugios temporales</h1>
     <p>Encuentra refugios por municipio o comunidad y ubícalos en el mapa.</p></div>
     <p class="shelter-source">Los registros rurales provienen del plan estatal. Consulta con Protección Civil si están habilitados antes de trasladarte.${profile==='coordinacion'?'':` <a class="link" href="${shelterPlan}" target="_blank" rel="noopener">Ver plan estatal</a>`}</p>
     <div class="card shelter-filters" aria-label="Filtros del directorio" role="group">
       ${ruralFilters()}
       <label>Buscar refugio<input id="shelter-query" type="search" placeholder="Nombre, localidad o dirección" value="${escapeHTML(shelterQuery)}"></label>
-      <label>Estado<select id="shelter-status"><option value="">Todos los estados</option>
-        ${options.map(status=>`<option${status===shelterStatus?' selected':''}>${status}</option>`).join('')}</select></label>
+
     </div>
     <div class="segment shelter-view" role="group" aria-label="Vista del directorio">
       <button type="button" data-mode="lista" aria-pressed="${mode==='lista'}">Lista</button>
@@ -1204,21 +1267,16 @@ function detail(id){
   const rural=ruralShelters[id];
   const address=[place[1],rural?.locality,shelterTowns[place[2]],'Puebla, México'].filter(Boolean).join(', ');
   const directions='https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(address);
-  const access={
-    'Abierto':'Confirma el acceso con las autoridades antes de trasladarte.',
-    'Acceso bloqueado':'El acceso está bloqueado en el ejercicio. Consulta otros refugios del municipio.',
-    'Sin confirmar':'El acceso está pendiente de confirmar en el ejercicio.',
-  };
+
   return `${back('refugios','Refugios')}
-    <div class="shelter-intro"><span class="kicker">Refugios disponibles</span><h1>${place[0]}</h1>${shelterBadge(place[3])}</div>
+    <div class="shelter-intro"><span class="kicker">Directorio de refugios</span><h1>${place[0]}</h1>${shelterBadge('Sin confirmar')}</div>
     <div class="card shelter-detail">
       <h2>Dirección</h2><p>${address}</p>
       ${rural? `<a class="link" href="${shelterPlan}" target="_blank" rel="noopener">Consultar ficha en el plan estatal</a>` : ''}
-      <h2>Acceso y capacidad</h2><p>${access[place[3]]}</p>
-      <p>${place[4]}</p><p class="shelter-capacity">${shelterCapacity(id)}</p>
+      <h2>Acceso y capacidad</h2><p>Confirma la apertura y el acceso con Protección Civil antes de trasladarte.</p>
+      <p>${place[4]}</p><p class="shelter-capacity">${shelterCapacity()}</p>
     </div>
-    ${place[3]==='Abierto'? `<a class="btn" href="${directions}" target="_blank" rel="noopener">Ver dirección en Google Maps</a>` :
-      '<a class="btn" href="#refugios">Consultar otros refugios</a>'}`;
+    <a class="btn" href="${directions}" target="_blank" rel="noopener">Ver dirección en Google Maps</a>`;
 }
 
 function refreshShelterResults(){
@@ -1632,8 +1690,6 @@ function changeMunicipality(value){
   routeReportPoint=null;
   routeResult=null;
 }
-const gatedPlanButtons='[data-add-person],[data-add-pet],[data-remove-person],[data-remove-pet],[data-vault-destroy]';
-const gatedPlanForms='#person-form,#pet-form,#family-plan-form,#vault-create-form,#vault-custom-form,#vault-note-form';
 app.addEventListener('click',event=>{
   const button=event.target.closest('[data-contact-scroll]');
   if(!button)return;
@@ -1651,31 +1707,17 @@ app.addEventListener('click',event=>{
   }
   if(target.closest('[data-plan-signout]')){
     planSession=null;
-    vaultOpen=false;
-    vaultKey=null;
-    vaultData=null;
+    loadPlanData();
     render();
     return;
   }
-  if(planSession)return;
-  const button=target.closest(gatedPlanButtons);
-  const field=target.closest('#family-plan-form input,#family-plan-form textarea,#vault-note');
-  const checkbox=target.closest('[data-supply],[data-vault-item]');
-  if(!button&&!field&&!checkbox)return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  requestPlanEdit(()=>{if(field)field.focus();else (button||checkbox).click()});
-},true);
-app.addEventListener('beforeinput',event=>{
-  if(planSession||!event.target.closest('#family-plan-form input,#family-plan-form textarea,#vault-note'))return;
-  event.preventDefault();
-  requestPlanEdit(()=>event.target.focus());
-},true);
-app.addEventListener('submit',event=>{
-  if(planSession||!event.target.matches(gatedPlanForms))return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  requestPlanEdit(()=>event.target.requestSubmit());
+  const add=target.closest('[data-add-person],[data-add-pet]');
+  if(!planSession&&add){
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const selector=add.hasAttribute('data-add-person')?'[data-add-person]':'[data-add-pet]';
+    requestPlanEdit(()=>app.querySelector(selector)?.click());
+  }
 },true);
 app.addEventListener('input',event=>{
   if(event.target.id!=='shelter-query')return;
@@ -1697,22 +1739,20 @@ app.addEventListener('change',event=>{
   }
   if(id==='shelter-map-point'){
     shelterMapId=Number(value);
-  }else if(id==='shelter-status'){
-    shelterStatus=value;
   }else{return}
   refreshShelterResults();
   if(id==='shelter-map-point')document.querySelector('#shelter-map-point').focus();
 });
 app.addEventListener('change',e=>{if(e.target.id==='route-destination'){routeDestination=Number(e.target.value);render()}});
 app.addEventListener('change',e=>{
-  if(e.target.dataset.supply!==undefined){const index=Number(e.target.dataset.supply);suppliesChecked=e.target.checked?[...new Set([...suppliesChecked,index])]:suppliesChecked.filter(i=>i!==index);try{localStorage.setItem('sicep.supplies.v1',JSON.stringify(suppliesChecked))}catch{}const status=document.querySelector('#supplies-progress');if(status)status.textContent=suppliesChecked.length+' de '+supplyItems.length+' artículos marcados';return}
+  if(e.target.dataset.supply!==undefined){const index=Number(e.target.dataset.supply);suppliesChecked=e.target.checked?[...new Set([...suppliesChecked,index])]:suppliesChecked.filter(i=>i!==index);try{localStorage.setItem(planDataKey('sicep.supplies.v1'),JSON.stringify(suppliesChecked))}catch{}const status=document.querySelector('#supplies-progress');if(status)status.textContent=suppliesChecked.length+' de '+supplyItems.length+' artículos marcados';return}
   if(e.target.dataset.prep===undefined)return;
   const index=Number(e.target.dataset.prep);
   prepared=e.target.checked?[...new Set([...prepared,index])]:prepared.filter(i=>i!==index);
   const status=document.querySelector('#prep-status');
   status.textContent=prepared.length+' de '+checklist.length+' tareas completadas';
   document.querySelector('progress').value=prepared.length;
-  try{localStorage.setItem('sicep.prepared',JSON.stringify(prepared))}
+  try{localStorage.setItem(planDataKey('sicep.prepared'),JSON.stringify(prepared))}
   catch{status.textContent+=' · El navegador no pudo guardar el avance.'}
 });
 app.addEventListener('submit',async e=>{e.preventDefault();
@@ -1751,7 +1791,7 @@ app.addEventListener('submit',async e=>{e.preventDefault();
   const text=String(new FormData(e.target).get('message')||'').trim();
   if(text&&incident?.stage===3)update(3,incident.count,null,null,{id:crypto.randomUUID(),text,type:String(new FormData(e.target).get('type')),reference:String(new FormData(e.target).get('reference')||'')});
   return;
-}if(e.target.id==='person-form'||e.target.id==='pet-form'){const data=new FormData(e.target),item=Object.fromEntries(data.entries());if(e.target.id==='person-form')household.people.push(item);else household.pets.push(item);try{localStorage.setItem(homeStore,JSON.stringify(household))}catch{alert('No se pudo guardar en este dispositivo. Libera espacio e inténtalo de nuevo.');return}render();return}if(e.target.id==='route-report-form'){submitRoadReport(e.target);return}if(e.target.id==='assignment'){const data=new FormData(e.target);update(2,incident?.count||35,null,{shelter:String(data.get('shelter')),brigade:String(data.get('brigade'))});return}if(e.target.id==='report'){const data=new FormData(e.target),details={locality:String(data.get('locality')||''),reportedAt:new Date(String(data.get('reportedAt'))).toISOString(),source:String(data.get('source')||''),impact:String(data.get('impact')||''),need:String(data.get('need')||''),verification:String(data.get('verification')||'')};coordEditing=false;update(1,Number(data.get('count')),details);return}update(1,Number(new FormData(e.target).get('count')))});
+}if(e.target.id==='person-form'||e.target.id==='pet-form'){const data=new FormData(e.target),item=Object.fromEntries(data.entries());if(e.target.id==='person-form')household.people.push(item);else household.pets.push(item);try{localStorage.setItem(planDataKey(homeStore),JSON.stringify(household))}catch{alert('No se pudo guardar en este dispositivo. Libera espacio e inténtalo de nuevo.');return}render();return}if(e.target.id==='route-report-form'){submitRoadReport(e.target);return}if(e.target.id==='assignment'){const data=new FormData(e.target);update(2,incident?.count||35,null,{shelter:String(data.get('shelter')),brigade:String(data.get('brigade'))});return}if(e.target.id==='report'){const data=new FormData(e.target),details={locality:String(data.get('locality')||''),reportedAt:new Date(String(data.get('reportedAt'))).toISOString(),source:String(data.get('source')||''),impact:String(data.get('impact')||''),need:String(data.get('need')||''),verification:String(data.get('verification')||'')};coordEditing=false;update(1,Number(data.get('count')),details);return}update(1,Number(new FormData(e.target).get('count')))});
 app.addEventListener('click',async event=>{
   const button=event.target.closest('button');
   if(!button)return;
@@ -1796,10 +1836,11 @@ app.addEventListener('click',async event=>{
   }catch{alert('No se pudo abrir un nuevo folio. Revisa la conexión.')}
   finally{button.disabled=false}
 });
-app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-retry-rural')){ruralCatalogStatus='idle';loadRuralCatalog();return}if(b.dataset.radioAck){if(incident?.stage===3)update(3,incident.count,null,null,{id:b.dataset.radioAck});return}if(b.hasAttribute('data-add-person')){document.querySelector('#person-dialog')?.showModal();return}if(b.hasAttribute('data-add-pet')){document.querySelector('#pet-dialog')?.showModal();return}if(b.hasAttribute('data-close-dialog')){b.closest('dialog')?.close();return}if(b.dataset.removePerson!==undefined||b.dataset.removePet!==undefined){const people=b.dataset.removePerson!==undefined,index=Number(people?b.dataset.removePerson:b.dataset.removePet),items=people?household.people:household.pets;if(Number.isInteger(index)&&confirm(`¿Quitar ${items[index]?.name||'este registro'} del hogar?`)){items.splice(index,1);localStorage.setItem(homeStore,JSON.stringify(household));render()}return}if(b.hasAttribute('data-case-edit')){coordEditing=true;render();return}if(b.hasAttribute('data-case-cancel')){coordEditing=false;render();return}if(b.hasAttribute('data-support-request')){const details={...caseDetails(),supportRequested:true};update(1,incident?.count||35,details);return}if(b.dataset.refreshRoutes!==undefined)refreshRoadReports();if(b.dataset.routeMode){routeMapMode=b.dataset.routeMode;if(routeMapMode==='origin')routeReportPoint=null;render();if(routeMapMode==='report')setTimeout(()=>document.querySelector('#route-real-map')?.scrollIntoView({behavior:'smooth',block:'center'}),100)}if(b.hasAttribute('data-route-location')){if(!navigator.geolocation){alert('Este navegador no permite compartir ubicación.');return}navigator.geolocation.getCurrentPosition(position=>{routeOrigin=[position.coords.latitude,position.coords.longitude];routeMapMode='origin';render()},()=>alert('No se pudo obtener la ubicación. Puedes marcar la salida tocando el mapa.'),{enableHighAccuracy:true,timeout:10000,maximumAge:60000})}if(b.hasAttribute('data-refresh-monitoring')){render();return}if(b.dataset.layer){hazardLayer=b.dataset.layer;riskMapInstance?.remove();riskMapInstance=null;riskMapView=null;render()}if(b.dataset.clearShelters!==undefined){shelterQuery='';shelterStatus='';ruralLocalityCode='';render();document.querySelector('#shelter-query').focus()}if(b.dataset.mode){mode=b.dataset.mode;render();document.querySelector('[data-mode="'+mode+'"]').focus()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
-app.addEventListener('submit',async e=>{const form=e.target;if(!['family-plan-form','vault-create-form','vault-open-form','vault-custom-form','vault-note-form'].includes(form.id))return;e.preventDefault();e.stopImmediatePropagation();if(form.id==='family-plan-form'){familyPlan=Object.fromEntries(new FormData(form).entries());try{localStorage.setItem(planStore,JSON.stringify(familyPlan));document.querySelector('#plan-status').textContent='Plan guardado en este dispositivo.'}catch{document.querySelector('#plan-status').textContent='No se pudo guardar; libera espacio e inténtalo de nuevo.'}return}if(form.id==='vault-note-form'){vaultData.note=String(new FormData(form).get('note')||'');if(await saveVault()){vaultOpen=false;vaultKey=null;vaultData=null;render()}return}if(form.id==='vault-create-form'){const data=new FormData(form),password=String(data.get('password')||'');if(password!==String(data.get('confirm')||'')){const error=document.createElement('p');error.className='vault-error';error.setAttribute('role','alert');error.textContent='Las contraseñas no coinciden.';form.querySelector('button[type=submit]').before(error);return}try{const salt=crypto.getRandomValues(new Uint8Array(16)),key=await deriveVaultKey(password,salt),payload={checked:[],custom:[],note:'',hint:String(data.get('hint')||'').trim()},record=await encryptVault(payload,key,salt);localStorage.setItem(vaultStore,JSON.stringify(record));vaultRecord=record;vaultData=payload;vaultKey=key;vaultOpen=true;vaultMessage='';render()}catch{vaultMessage='No se pudo crear la bóveda en este navegador.';render()}return}if(form.id==='vault-open-form'){const password=String(new FormData(form).get('password')||'');try{const opened=await decryptVault(vaultRecord,password);vaultData=opened.data;vaultKey=opened.key;vaultOpen=true;vaultMessage='';render()}catch{vaultMessage='No se pudo abrir. Revisa la contraseña e inténtalo otra vez.';render()}return}const name=String(new FormData(form).get('name')||'').trim();if(!name)return;vaultData.custom.push(name);if(await saveVault())render()},true);
+app.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-retry-rural')){ruralCatalogStatus='idle';loadRuralCatalog();return}if(b.dataset.radioAck){if(incident?.stage===3)update(3,incident.count,null,null,{id:b.dataset.radioAck});return}if(b.hasAttribute('data-add-person')){document.querySelector('#person-dialog')?.showModal();return}if(b.hasAttribute('data-add-pet')){document.querySelector('#pet-dialog')?.showModal();return}if(b.hasAttribute('data-close-dialog')){b.closest('dialog')?.close();return}if(b.dataset.removePerson!==undefined||b.dataset.removePet!==undefined){const people=b.dataset.removePerson!==undefined,index=Number(people?b.dataset.removePerson:b.dataset.removePet),items=people?household.people:household.pets;if(Number.isInteger(index)&&confirm(`¿Quitar ${items[index]?.name||'este registro'} del hogar?`)){items.splice(index,1);localStorage.setItem(planDataKey(homeStore),JSON.stringify(household));render()}return}if(b.hasAttribute('data-case-edit')){coordEditing=true;render();return}if(b.hasAttribute('data-case-cancel')){coordEditing=false;render();return}if(b.hasAttribute('data-support-request')){const details={...caseDetails(),supportRequested:true};update(1,incident?.count||35,details);return}if(b.dataset.refreshRoutes!==undefined)refreshRoadReports();if(b.dataset.routeMode){routeMapMode=b.dataset.routeMode;if(routeMapMode==='origin')routeReportPoint=null;render();if(routeMapMode==='report')setTimeout(()=>document.querySelector('#route-real-map')?.scrollIntoView({behavior:'smooth',block:'center'}),100)}if(b.hasAttribute('data-route-location')){if(!navigator.geolocation){alert('Este navegador no permite compartir ubicación.');return}navigator.geolocation.getCurrentPosition(position=>{routeOrigin=[position.coords.latitude,position.coords.longitude];routeMapMode='origin';render()},()=>alert('No se pudo obtener la ubicación. Puedes marcar la salida tocando el mapa.'),{enableHighAccuracy:true,timeout:10000,maximumAge:60000})}if(b.hasAttribute('data-refresh-monitoring')){render();return}if(b.dataset.layer){hazardLayer=b.dataset.layer;riskMapInstance?.remove();riskMapInstance=null;riskMapView=null;render()}if(b.dataset.clearShelters!==undefined){shelterQuery='';ruralLocalityCode='';render();document.querySelector('#shelter-query').focus()}if(b.dataset.mode){mode=b.dataset.mode;render();document.querySelector('[data-mode="'+mode+'"]').focus()}if(b.dataset.zoom){zoom=Math.min(1.6,Math.max(1,zoom+Number(b.dataset.zoom)*.2));render()}if(b.dataset.step){let stage=Number(b.dataset.step);update(stage,incident?.count||35)}});
+app.addEventListener('submit',async e=>{const form=e.target,session=planSession;if(!['family-plan-form','vault-create-form','vault-open-form','vault-custom-form','vault-note-form'].includes(form.id))return;e.preventDefault();e.stopImmediatePropagation();if(form.id==='family-plan-form'){familyPlan=Object.fromEntries(new FormData(form).entries());try{localStorage.setItem(planDataKey(planStore),JSON.stringify(familyPlan));document.querySelector('#plan-status').textContent='Plan guardado en este dispositivo.'}catch{document.querySelector('#plan-status').textContent='No se pudo guardar; libera espacio e inténtalo de nuevo.'}return}if(form.id==='vault-note-form'){vaultData.note=String(new FormData(form).get('note')||'');if(await saveVault()){vaultOpen=false;vaultKey=null;vaultData=null;render()}return}if(form.id==='vault-create-form'){const data=new FormData(form),password=String(data.get('password')||'');if(password!==String(data.get('confirm')||'')){const error=document.createElement('p');error.className='vault-error';error.setAttribute('role','alert');error.textContent='Las contraseñas no coinciden.';form.querySelector('button[type=submit]').before(error);return}try{const salt=crypto.getRandomValues(new Uint8Array(16)),key=await deriveVaultKey(password,salt),payload={checked:[],custom:[],note:'',hint:String(data.get('hint')||'').trim()},record=await encryptVault(payload,key,salt);if(planSession!==session)return;localStorage.setItem(planDataKey(vaultStore),JSON.stringify(record));vaultRecord=record;vaultData=payload;vaultKey=key;vaultOpen=true;vaultMessage='';render()}catch{vaultMessage='No se pudo crear la bóveda en este navegador.';render()}return}if(form.id==='vault-open-form'){const password=String(new FormData(form).get('password')||'');try{const opened=await decryptVault(vaultRecord,password);if(planSession!==session)return;vaultData=opened.data;vaultKey=opened.key;vaultOpen=true;vaultMessage='';render()}catch{vaultMessage='No se pudo abrir. Revisa la contraseña e inténtalo otra vez.';render()}return}const name=String(new FormData(form).get('name')||'').trim();if(!name)return;vaultData.custom.push(name);if(await saveVault())render()},true);
 app.addEventListener('change',async e=>{if(e.target.dataset.vaultItem===undefined)return;e.stopImmediatePropagation();const index=Number(e.target.dataset.vaultItem),checked=new Set(vaultData.checked||[]);if(e.target.checked)checked.add(index);else checked.delete(index);vaultData.checked=[...checked];await saveVault()},true);
-app.addEventListener('click',e=>{const destroy=e.target.closest('[data-vault-destroy]'),lock=e.target.closest('[data-vault-lock]');if(!destroy&&!lock)return;e.preventDefault();e.stopImmediatePropagation();if(destroy){if(!confirm('¿Destruir la bóveda y borrar definitivamente las notas y marcas guardadas?'))return;localStorage.removeItem(vaultStore);vaultRecord=null;vaultMessage=''}vaultOpen=false;vaultKey=null;vaultData=null;render()},true);
+app.addEventListener('click',e=>{const destroy=e.target.closest('[data-vault-destroy]'),lock=e.target.closest('[data-vault-lock]');if(!destroy&&!lock)return;e.preventDefault();e.stopImmediatePropagation();if(destroy){if(!confirm('¿Destruir la bóveda y borrar definitivamente las notas y marcas guardadas?'))return;localStorage.removeItem(planDataKey(vaultStore));vaultRecord=null;vaultMessage=''}vaultOpen=false;vaultKey=null;vaultData=null;render()},true);
+loadPlanData();
 window.addEventListener('hashchange',()=>{const [page,id]=(location.hash.slice(1)||'inicio').split('/');if(page!=='guia'||id!=='documentos'){vaultOpen=false;vaultKey=null;vaultData=null}render();scrollTo(0,0)});render();
 
 if(hosted&&'serviceWorker' in navigator)navigator.serviceWorker.register('/offline.js').catch(()=>{});
