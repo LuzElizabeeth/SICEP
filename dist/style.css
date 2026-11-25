@@ -126,3 +126,5 @@
 
 .supply-item summary{position:absolute;top:12px;right:3px}
 @media(max-width:520px){.supply-item summary{position:static}.supply-item details[open] summary{position:static;text-align:right;margin:0 3px 6px 0}}
+
+.volcano-indicator-note{max-width:440px;margin:10px 0 0;color:#635b5f;font-size:.86rem}.volcano-guide-grid .guidance-card p{margin:0 0 10px;color:#51484c}.volcano-guide-grid .guidance-card li{line-height:1.55}.volcano-shortcuts{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:12px}.volcano-shortcuts .link{font-size:.92rem}@media(max-width:760px){.volcano-shortcuts{display:grid;gap:5px}}
